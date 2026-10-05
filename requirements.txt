@@ -1,0 +1,5 @@
+# 运行后端和处理器需要的库：pip install -r requirements.txt
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+fastapi>=0.110
+uvicorn>=0.29

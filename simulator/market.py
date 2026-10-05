@@ -23,6 +23,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SESSIONS_UTC = {
     "XTKS": (0, 6 * 3600),                      # Tokyo 09:00-15:00 JST (lunch break ignored)
     "XAMS": (8 * 3600, 16 * 3600 + 1800),       # Amsterdam 09:00-17:30 CET
+    "XETR": (8 * 3600, 16 * 3600 + 1800),       # Frankfurt (Xetra) 09:00-17:30 CET
+    "XPAR": (8 * 3600, 16 * 3600 + 1800),       # Paris 09:00-17:30 CET
     "XLON": (8 * 3600, 16 * 3600 + 1800),       # London 08:00-16:30 GMT
     "XNYS": (14 * 3600 + 1800, 21 * 3600),      # New York 09:30-16:00 EST
     "FX": (0, 24 * 3600),                       # FX trades around the clock on weekdays

@@ -45,8 +45,8 @@ One JSON object per line. Timestamps are **UTC, second resolution**.
 
 ## Reference data (`data/instruments.csv`)
 
-23 instruments: 20 equities (5 each in the Netherlands, United States, United Kingdom, Japan) and
-3 FX pairs. Columns: `instrument_id, long_name, short_name, country, sector, industry, exchange, type, currency`.
+33 instruments: 30 equities (5 each in the Netherlands, Germany, France, United States, United Kingdom, Japan) and
+3 FX pairs. The Netherlands, Germany and France all trade in EUR, so country and currency are different dimensions (three countries share one currency). Columns: `instrument_id, long_name, short_name, country, sector, industry, exchange, type, currency`.
 
 FX is quoted as **units of the second currency per 1 unit of the first**:
 `EUR/USD` = USD per EUR, `GBP/USD` = USD per GBP, `USD/JPY` = JPY per USD.

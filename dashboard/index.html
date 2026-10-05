@@ -3,267 +3,621 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Market P&L Monitor</title>
+<title>P&amp;L Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
+/* ---------- design tokens: colours are named by role; dark mode swaps them in one place ---------- */
 :root {
   color-scheme: light;
-  --bg: #f4f3f0; --surface: #fcfcfb; --text: #0b0b0b; --text-2: #52514e; --text-3: #7a7973;
-  --grid: #e6e5e1; --axis: #bdbcb6;
-  --series: #2a78d6; --gain: #2a78d6; --loss: #e34948;
-  --crit: #d03b3b; --warn: #fab219; --ok: #0ca30c;
-  --warn-text: #8a5d00;
+  --page: #f4f6fa;  --surface: #ffffff;  --ink: #14213d;  --ink-2: #4a5568;  --ink-3: #6b7587;
+  --line: #d5dce8;  --grid: #e8ecf3;  --axis: #c3cbd9;  --hover: #f3f6fb;  --select: #eef3fa;
+  --hero-bg: #14213d;  --hero-ink: #ffffff;  --hero-ink-2: #c9d3e6;
+  --active-bg: #14213d;  --active-ink: #ffffff;  --focus: #1f4e8c;
+  --total: #14213d;  --other: #b7c5dc;
+  --gain: #2a78d6;  --loss: #e34948;
+  --ok: #0ca30c;  --warn: #fab219;  --crit: #d03b3b;  --watch: #b45309;
+  --crit-bg: #fff6f5;
+  /* categorical series, fixed order (validated palette) */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --bg: #111110; --surface: #1a1a19; --text: #ffffff; --text-2: #c3c2b7; --text-3: #8f8e86;
-    --grid: #2c2c2a; --axis: #4a4a46;
-    --series: #3987e5; --gain: #3987e5; --loss: #e66767; --warn-text: #fab219;
+    --page: #0d0d0d;  --surface: #1a1a19;  --ink: #f4f4f2;  --ink-2: #c3c2b7;  --ink-3: #a09f98;
+    --line: #383835;  --grid: #2c2c2a;  --axis: #45443f;  --hover: #232322;  --select: #26303f;
+    --hero-bg: #22304f;  --active-bg: #e8edf7;  --active-ink: #0d1526;  --focus: #6da7ec;
+    --total: #e8edf7;  --other: #55627a;
+    --gain: #3987e5;  --loss: #e66767;  --watch: #e8963d;  --crit-bg: #2a1a1a;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   }
 }
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #111110; --surface: #1a1a19; --text: #ffffff; --text-2: #c3c2b7; --text-3: #8f8e86;
-  --grid: #2c2c2a; --axis: #4a4a46;
-  --series: #3987e5; --gain: #3987e5; --loss: #e66767; --warn-text: #fab219;
-}
+
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 16px; }
-h1 { font-size: 18px; margin: 0; font-weight: 650; }
-.meta { color: var(--text-2); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-.badge { font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--axis); color: var(--text-2); }
-.badge .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 5px; }
-.badge.done .dot { background: var(--axis); }
-.badge.err .dot { background: var(--crit); }
-.card { background: var(--surface); border-radius: 10px; padding: 16px; border: 1px solid var(--grid); }
-.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
-.kpi .label { color: var(--text-2); font-size: 12px; }
-.kpi .val { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
-.kpi .val.big { font-size: 28px; }
-.kpi .val { white-space: nowrap; }
-.kpis > *, .grid2 > * { min-width: 0; }
-.kpi .sub { color: var(--text-3); font-size: 12px; margin-top: 2px; }
-.up { color: var(--gain); } .down { color: var(--loss); }
-.grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
-h2 { font-size: 14px; margin: 0 0 2px; font-weight: 650; }
-.hint { color: var(--text-3); font-size: 12px; margin-bottom: 8px; }
-#chartbox { position: relative; }
-svg { display: block; width: 100%; height: auto; overflow: visible; }
-.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 2px 8px rgb(0 0 0 / .18); display: none; white-space: nowrap; z-index: 2; }
-.tip b { font-variant-numeric: tabular-nums; }
-.alerts { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; }
-.alerts li { display: flex; gap: 8px; padding: 7px 0; border-top: 1px solid var(--grid); font-size: 13px; }
-.alerts li:first-child { border-top: 0; }
-.lvl { font-weight: 700; font-size: 11px; letter-spacing: .05em; min-width: 74px; }
-.lvl.critical { color: var(--crit); } .lvl.warning { color: var(--warn-text); }
-.lvl i { font-style: normal; margin-right: 3px; }
-.none { color: var(--text-2); padding: 8px 0; }
-.none i { color: var(--ok); font-style: normal; margin-right: 4px; }
-.tablewrap { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-th, td { padding: 6px 10px; text-align: right; white-space: nowrap; border-top: 1px solid var(--grid); }
-th { color: var(--text-2); font-weight: 600; font-size: 12px; border-top: 0; border-bottom: 1px solid var(--axis); }
-th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
-td.name { font-weight: 600; }
-td.country { color: var(--text-2); }
-.bar { display: inline-block; width: 70px; height: 8px; background: var(--grid); border-radius: 4px; position: relative; vertical-align: middle; margin-right: 8px; overflow: hidden; }
-.bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--series); border-radius: 0 4px 4px 0; }
-.bar.over > span { background: var(--crit); }
-.stale { color: var(--warn-text); font-weight: 600; }
-.controls { display: none; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-.controls button, details summary { font: inherit; background: var(--surface); color: var(--text); border: 1px solid var(--axis); border-radius: 6px; padding: 3px 12px; cursor: pointer; }
-.controls input[type=range] { flex: 1; min-width: 160px; }
-details { margin-top: 10px; } details table { max-width: 360px; }
-footer { color: var(--text-3); font-size: 12px; margin-top: 14px; }
-@media (max-width: 820px) { .kpi .val, .kpi .val.big { font-size: 20px; } .kpis { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--page); color: var(--ink); font: 14px/1.35 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.num { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+h1, h2 { margin: 0; }
+
+.app { height: 100vh; min-height: 760px; min-width: 1100px; padding: 12px 24px; display: flex; flex-direction: column; gap: 10px; transition: opacity .2s; }
+.app.loading { opacity: .6; }
+.banner { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); background: var(--crit); color: #fff; font-weight: 600; padding: 6px 16px; border-radius: 8px; z-index: 10; }
+.banner[hidden] { display: none; }
+
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--grid); color: var(--ink-2); white-space: nowrap; }
+.chip.live { background: var(--hero-bg); color: var(--hero-ink); }
+.lbl { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* ---------- controls ---------- */
+.segs { display: flex; }
+.seg, .sel, .thb, .pick, .crumb { font: inherit; color: var(--ink); }
+.seg { font-size: 13px; background: var(--surface); border: 1px solid var(--line); padding: 6px 12px; min-height: 34px; cursor: pointer; white-space: nowrap; margin-left: -1px; }
+.seg:first-child { border-radius: 8px 0 0 8px; margin-left: 0; } .seg:last-child { border-radius: 0 8px 8px 0; } .seg:only-child { border-radius: 8px; }
+.seg:hover { background: var(--hover); }
+.seg[aria-pressed="true"] { background: var(--active-bg); color: var(--active-ink); border-color: var(--active-bg); position: relative; }
+.sel { font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-height: 34px; cursor: pointer; }
+.pick { font-size: 13px; font-weight: 500; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; white-space: nowrap; min-height: 24px; }
+.pick:hover { text-decoration: underline; }
+.crumb { font-size: 13px; color: var(--focus); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; min-height: 24px; }
+.crumb[aria-current="true"] { color: var(--ink); text-decoration: none; font-weight: 600; cursor: default; }
+button:focus-visible, select:focus-visible, .hit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- top bar ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand h1 { font-size: 20px; font-weight: 700; white-space: nowrap; }
+.asof { font-size: 12px; color: var(--ink-2); }
+.period { display: flex; align-items: center; gap: 8px; }
+.health { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
+.health span { display: flex; align-items: center; gap: 6px; }
+.dot { font-size: 11px; line-height: 1; }
+.dot.ok { color: var(--ok); } .dot.delayed { color: #b07a00; } .dot.stale { color: var(--crit); } .dot.unknown { color: var(--ink-3); }
+
+/* ---------- KPI strip ---------- */
+.kpis { display: grid; grid-template-columns: 1.5fr 1.2fr 1fr 1fr; gap: 12px; height: 84px; flex: 0 0 auto; }
+.kpi { border-radius: 12px; padding: 8px 16px; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--line); }
+.kpi.hero { background: var(--hero-bg); color: var(--hero-ink); border-color: var(--hero-bg); padding: 8px 18px; }
+.kpi.watched { border: 2px solid var(--watch); padding: 7px 15px; }
+.kpi .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.kpi .name { font-size: 13px; font-weight: 500; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi.hero .name { color: var(--hero-ink-2); }
+.kpi .delta { font-size: 12px; color: var(--ink-2); }
+.kpi.hero .delta { color: #9db4d6; }
+.kpi .val { font-size: 30px; line-height: 36px; font-weight: 600; }
+.kpi.hero .val { font-size: 36px; line-height: 40px; }
+
+/* ---------- main row ---------- */
+.mid { display: grid; grid-template-columns: 2.2fr 1fr; gap: 12px; flex: 1 1 52%; min-height: 330px; }
+.chart-card { gap: 6px; padding: 10px 16px 12px; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
+.chart-head h2 { font-size: 16px; font-weight: 700; }
+.ctrls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ctrls .grp { display: flex; align-items: center; gap: 6px; }
+.chart-sub { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; font-size: 13px; color: var(--ink-2); }
+.crumbs { display: flex; align-items: center; gap: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; }
+.plotwrap { position: relative; flex: 1 1 auto; min-height: 150px; margin: 6px 14px 24px 54px; }
+.plotwrap.labels { margin-right: 150px; }
+.plot { position: absolute; inset: 0; }
+.plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.plot path { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.gl { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+.gl.zero { border-top-color: var(--axis); }
+.gl span, .xt { font-size: 12px; color: var(--ink-3); }
+.gl span { position: absolute; left: -50px; top: -9px; width: 44px; text-align: right; }
+.xt { position: absolute; top: 100%; margin-top: 6px; transform: translateX(-50%); }
+.edot { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--surface); }
+.elab { position: absolute; left: 100%; margin-left: 12px; font-size: 12px; color: var(--ink); white-space: nowrap; transform: translateY(-50%); max-width: 136px; overflow: hidden; text-overflow: ellipsis; }
+.elab b { font-weight: 600; }
+.amark { position: absolute; top: 0; bottom: 0; border-left: 2px dashed var(--watch); pointer-events: none; }
+.atag { position: absolute; top: 4px; transform: translateX(-100%); margin-left: -8px; background: var(--watch); color: #fff; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 6px; white-space: nowrap; pointer-events: none; }
+.hit { position: absolute; inset: 0; cursor: crosshair; }
+.cross { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--ink-2); pointer-events: none; display: none; }
+.tip { position: absolute; top: 6px; min-width: 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.14); pointer-events: none; display: none; z-index: 3; }
+.tip .th { font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+.tip .tr { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 20px; }
+.tip .tr i { display: inline-block; width: 12px; height: 0; border-top: 2px solid; flex: 0 0 auto; }
+.tip .tr .tn { color: var(--ink-2); flex: 1 1 auto; }
+.tip .tr .tv { font-weight: 600; color: var(--ink); }
+.empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-3); font-size: 14px; }
+
+/* ---------- ranking ---------- */
+.rank-card { gap: 6px; padding: 10px 14px; }
+.rank-card .rh { display: flex; justify-content: space-between; align-items: center; }
+.rank-card h2 { font-size: 15px; font-weight: 700; }
+.hint { font-size: 12px; line-height: 17px; color: var(--ink-2); }
+.rank { display: flex; flex-direction: column; gap: 1px; overflow: auto; flex: 1 1 auto; }
+.rrow { display: flex; align-items: center; gap: 8px; border-radius: 6px; padding: 1px 6px; min-height: 27px; }
+.rrow.sel { background: var(--select); }
+.rrow.hd { min-height: 24px; font-size: 12px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+.sw { display: inline-block; flex: 0 0 10px; height: 10px; border-radius: 2px; }
+.rrow .pick { flex: 0 0 132px; overflow: hidden; text-overflow: ellipsis; }
+.rrow .bar { flex: 1 1 auto; min-width: 0; }
+.rrow .bar div { height: 10px; border-radius: 3px; }
+.rrow .rv { flex: 0 0 76px; text-align: right; font-size: 13px; }
+
+/* ---------- bottom row ---------- */
+.bottom { display: grid; grid-template-columns: 1.7fr 1fr; gap: 12px; flex: 1 1 36%; min-height: 220px; }
+.table-card { gap: 4px; padding: 8px 14px; }
+.table-card .th2 { display: flex; justify-content: space-between; align-items: center; }
+.table-card h2 { font-size: 14px; font-weight: 700; }
+.tablewrap { overflow: auto; flex: 1 1 auto; border: 1px solid var(--grid); border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; min-width: 820px; }
+th { padding: 0 8px; text-align: right; font-size: 12px; font-weight: 500; color: var(--ink-2); border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface); position: sticky; top: 0; }
+td { padding: 1px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; font-size: 13px; }
+th.l, td.l { text-align: left; } td.l { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+tr.sel td { background: var(--select); }
+.thb { font-size: 12px; font-weight: 500; color: var(--ink-2); background: none; border: 0; padding: 5px 0; cursor: pointer; }
+.thb:hover { color: var(--ink); }
+.stale { color: var(--ink); font-weight: 600; }
+
+.side { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.alerts-card { padding: 8px 14px; gap: 6px; flex: 1 1 auto; overflow: auto; }
+.alerts-card.high { border: 2px solid var(--crit); background: var(--crit-bg); padding: 7px 13px; }
+.alerts-card .ah { display: flex; justify-content: space-between; align-items: center; }
+.alerts-card h2 { font-size: 14px; font-weight: 700; }
+.al { font-size: 13px; line-height: 19px; }
+.al .sev { font-weight: 700; margin-right: 4px; }
+.al .sev.high { color: var(--crit); } .al .sev.medium { color: #8a5d00; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .al .sev.medium { color: var(--warn); } }
+.al small { display: block; font-size: 12px; color: var(--ink-2); }
+.risk { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 0 0 auto; }
+.risk .card { padding: 6px 12px; gap: 0; }
+.risk .lbl { font-size: 12px; }
+.risk .v { font-size: 18px; line-height: 26px; font-weight: 600; }
+.risk small { font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: no-preference) { .app { transition: opacity .2s; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Market P&amp;L Monitor</h1>
-    <span class="badge" id="badge"><span class="dot"></span><span id="badgeText">CONNECTING</span></span>
-    <div class="meta"><span id="asof">–</span><span id="msgs"></span><span id="quality"></span></div>
+<div class="banner" id="banner" hidden>Can't reach the API — showing the last data, retrying every 5 s</div>
+<div class="app" id="app">
+
+  <!-- Top bar: title, period slicer, health -->
+  <header class="top">
+    <div class="brand">
+      <h1>P&amp;L Monitor</h1><span class="chip live">Live · 5 s</span>
+      <span class="asof num" id="asof">Waiting for data…</span>
+    </div>
+    <div class="period">
+      <span class="lbl">Period</span>
+      <div class="segs" id="presets" role="group" aria-label="Period presets"></div>
+      <select class="sel" id="from" aria-label="From date"></select>
+      <span class="lbl">to</span>
+      <select class="sel" id="to" aria-label="To date"></select>
+    </div>
+    <div class="health" id="health"></div>
   </header>
 
-  <section class="kpis">
-    <div class="card kpi"><div class="label">Total P&amp;L (EUR)</div><div class="val big" id="kTotal">–</div><div class="sub">realized + unrealized</div></div>
-    <div class="card kpi"><div class="label">Realized</div><div class="val" id="kReal">–</div><div class="sub">closed part of positions</div></div>
-    <div class="card kpi"><div class="label">Unrealized</div><div class="val" id="kUnreal">–</div><div class="sub">open positions at latest price</div></div>
-    <div class="card kpi"><div class="label">Open exposure</div><div class="val" id="kGross">–</div><div class="sub" id="kGrossSub">sum of position values</div></div>
+  <!-- KPI strip -->
+  <section class="kpis" id="kpis">
+    <div class="kpi hero"><div class="row"><span class="name" id="k1n">Total P&amp;L</span><span class="delta num" id="k1d"></span></div><div class="val num" id="k1v">—</div></div>
+    <div class="kpi watched"><div class="row"><span class="name">Unrealized P&amp;L · watched</span><span class="delta num" id="k2d"></span></div><div class="val num" id="k2v">—</div></div>
+    <div class="kpi"><div class="row"><span class="name">Realized P&amp;L</span><span class="delta num" id="k3d"></span></div><div class="val num" id="k3v">—</div></div>
+    <div class="kpi"><div class="row"><span class="name">Gross exposure</span><span class="delta num" id="k4d"></span></div><div class="val num" id="k4v">—</div></div>
   </section>
 
-  <section class="grid2">
-    <div class="card">
-      <h2>Total P&amp;L over time</h2>
-      <div class="hint">Simulated time, UTC. Hover for values.</div>
-      <div id="chartbox"><svg id="chart" role="img" aria-label="Line chart of total P&amp;L in EUR over simulated time"></svg><div class="tip" id="tip"></div></div>
-      <div class="controls" id="controls">
-        <button id="play">Pause</button>
-        <button id="speed">1×</button>
-        <input type="range" id="scrub" min="0" value="0" aria-label="Replay position">
+  <!-- Main: the P&L line and what drives it -->
+  <section class="mid">
+    <div class="card chart-card">
+      <div class="chart-head">
+        <h2 id="chartTitle">P&amp;L (€) over time</h2>
+        <div class="ctrls">
+          <div class="grp"><span class="lbl">Split by</span><div class="segs" id="dims" role="group" aria-label="Split by"></div></div>
+          <div class="segs" id="fxs" role="group" aria-label="FX basis"></div>
+          <div class="segs" id="views" role="group" aria-label="Chart view"></div>
+        </div>
       </div>
-      <details><summary>Chart data</summary><div class="tablewrap"><table id="histTable"></table></div></details>
+      <div class="chart-sub">
+        <div class="crumbs" id="crumbs"><span>Showing:</span></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="plotwrap" id="plotwrap"><div class="plot" id="plot"></div></div>
     </div>
-    <div class="card">
-      <h2>Alerts on open positions</h2>
-      <div class="hint" id="alertHint"></div>
-      <ul class="alerts" id="alerts"></ul>
+    <div class="card rank-card">
+      <div class="rh"><h2 id="rankTitle">Contribution</h2><span class="chip">Hourly</span></div>
+      <div class="hint" id="rankHint"></div>
+      <div class="rank" id="rank"></div>
     </div>
   </section>
 
-  <section class="card">
-    <h2>Positions</h2>
-    <div class="hint">Sorted by position value. Bar shows position value against the per-instrument limit.</div>
-    <div class="tablewrap"><table id="pos"></table></div>
+  <!-- Bottom: explorer + alerts -->
+  <section class="bottom">
+    <div class="card table-card">
+      <div class="th2"><h2 id="tblTitle">Instruments</h2><span class="lbl">Click a column to sort · click a row to chart that stock</span></div>
+      <div class="tablewrap"><table><thead><tr id="thead"></tr></thead><tbody class="num" id="tbody"></tbody></table></div>
+    </div>
+    <div class="side">
+      <div class="card alerts-card" id="alertsCard">
+        <div class="ah"><h2>Alerts</h2><span class="chip live">Live</span></div>
+        <div id="alertsBody"></div>
+      </div>
+      <div class="risk" id="risk"></div>
+    </div>
   </section>
-
-  <footer>All data is simulated. Total P&amp;L = cumulative cash flow + position × latest price, converted to EUR at the latest FX rate. P&amp;L shown here is provisional; the end-of-day batch is the authoritative figure.</footer>
 </div>
 
 <script>
-const $ = id => document.getElementById(id);
-const POLL_MS = Number(new URLSearchParams(location.search).get('every') || 3) * 1000;
-const forced = new URLSearchParams(location.search).get('mode');
-let mode = null, state = null, replay = null, frameIdx = 0, playing = true, speed = 1;
+'use strict';
+/* ====================================================================================
+   P&L Monitor. Everything comes from the API (/api/...). Two refresh tiers:
+     every 5 s : status, KPIs, instrument table, alerts      (they read gold.live_state)
+     every 30 s or when something is clicked : P&L curve + contribution ranking (hourly snapshots)
+   All text from the API goes into the page with textContent, never innerHTML.
+   ==================================================================================== */
+const API = '/api/';
+const TICK_MS = 5000, HOURLY_EVERY = 6, STALE_MIN = 30;
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DASH = ['none', '7 5', 'none', '2 4', 'none', '7 5', 'none', '2 4'];
+const DIMS = [['none','None'], ['country','Country'], ['sector','Sector'], ['exchange','Exchange'], ['currency','Currency']];
+const DIMLBL = { country: 'country', sector: 'sector', exchange: 'exchange', currency: 'currency' };
 
-/* ---------- formatting ---------- */
-const nf0 = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
-const eur = (x, compact) => {
-  const a = Math.abs(x), s = x < 0 ? '−' : '';
-  if (compact) return a >= 1e6 ? `${s}€${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `${s}€${(a / 1e3).toFixed(0)}k` : `${s}€${a.toFixed(0)}`;
-  return `${s}€${nf0.format(a)}`;
-};
-const signed = x => (x > 0 ? '+' : x < 0 ? '−' : '') + '€' + nf0.format(Math.abs(x));
-const cls = x => x > 0 ? 'up' : x < 0 ? 'down' : '';
-const arrow = x => x > 0 ? '▲ ' : x < 0 ? '▼ ' : '';
-const DAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const tstr = iso => { const d = new Date(iso); return `${DAY[d.getUTCDay()]} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`; };
-const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const S = { fx: 'market', dim: 'none', view: 'total', from: null, to: null, grp: null, stock: null, sortKey: 'total', sortDir: -1 };
+const D = { meta: null, status: null, kpis: null, stocks: null, alerts: null, curve: null, contrib: null };
+let days = [], ver = 0, tickN = 0, colorOf = new Map();
 
-/* ---------- KPI, alerts, table ---------- */
-function setKpi(id, v, withArrow) { const e = $(id); e.className = e.className.replace(/\b(up|down)\b/g, '').trim() + ' ' + cls(v); e.textContent = (withArrow ? arrow(v) : '') + signed(v); }
-
-function renderSnapshot(s) {
-  if (!s.asof) return;
-  $('asof').textContent = 'Simulated time ' + tstr(s.asof) + ' UTC';
-  $('msgs').textContent = nf0.format(s.n) + ' messages';
-  $('quality').textContent = (s.rejected || s.duplicates) ? `${s.rejected} rejected, ${s.duplicates} duplicates` : '';
-  setKpi('kTotal', s.total, true); setKpi('kReal', s.real ?? s.realized); setKpi('kUnreal', s.unrealized);
-  $('kGross').textContent = eur(s.gross, true);
-  const lim = s.limits || {};
-  $('kGrossSub').textContent = `${s.positions.filter(p => p.pos).length} open positions`;
-  $('alertHint').textContent = `Unrealized loss ≥ ${(lim.loss_warn * 100).toFixed(0)}% of cost · value ≥ 80% of ${eur(lim.notional_limit_eur, true)} limit · price older than ${lim.stale_minutes} min`;
-  const ul = $('alerts');
-  ul.innerHTML = s.alerts.length ? s.alerts.map(a =>
-    `<li><span class="lvl ${a.level}"><i>${a.level === 'critical' ? '✖' : '▲'}</i>${a.level.toUpperCase()}</span><span>${esc(a.text).replace(/−(?=€)/g, '−\u2060')}</span></li>`).join('')
-    : '<li class="none"><i>✔</i>No open-position alerts</li>';
-  const rows = s.positions.map(p => {
-    const pct = Math.min(100, p.notional / lim.notional_limit_eur * 100);
-    const stale = p.stale;
-    return `<tr><td class="name">${esc(p.name)}</td><td class="country">${esc(p.country)}</td>
-      <td>${nf0.format(p.pos)}</td><td>${p.avg.toLocaleString('en-GB', {maximumFractionDigits: 2})}</td><td>${p.mark.toLocaleString('en-GB', {maximumFractionDigits: 2})} ${p.ccy}</td>
-      <td class="${stale ? 'stale' : ''}">${stale ? '▲ ' : ''}${p.age_min < 1 ? '<1' : Math.round(p.age_min)} min</td>
-      <td><span class="bar ${p.notional >= lim.notional_limit_eur ? 'over' : ''}"><span style="width:${pct}%"></span></span>${eur(p.notional, true)}</td>
-      <td class="${cls(p.unreal)}">${arrow(p.unreal)}${signed(p.unreal)}</td><td class="${cls(p.real)}">${signed(p.real)}</td><td class="${cls(p.total)}"><b>${signed(p.total)}</b></td></tr>`;
-  }).join('');
-  $('pos').innerHTML = `<thead><tr><th>Instrument</th><th>Country</th><th>Position (shares)</th><th>Avg cost</th><th>Latest price</th><th>Price age</th><th>Position value</th><th>Unrealized</th><th>Realized</th><th>Total</th></tr></thead><tbody>${rows}</tbody>`;
-}
-
-/* ---------- line chart (inline SVG) ---------- */
-let chartPts = [], chartRange = null;
-function niceTicks(lo, hi, n = 5) {
-  const span = hi - lo || 1, raw = span / n, mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw);
-  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v); return out;
-}
-function renderChart(pts, range) {
-  chartPts = pts; chartRange = range;
-  const svg = $('chart'), W = Math.max(260, $('chartbox').clientWidth), H = 280;
-  const m = { l: 56, r: W < 500 ? 56 : 78, t: 12, b: 28 };
-  const stepH = W < 500 ? 24 : 6;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const t0 = Date.parse(range[0]), t1 = Date.parse(range[1]);
-  const vals = pts.map(p => p[1]).concat([0]);
-  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * .08 || 1; lo -= pad; hi += pad;
-  const x = t => m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r), y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
-  let g = '';
-  niceTicks(lo, hi).forEach(v => { g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--text-3)">${eur(v, true)}</text>`; });
-  for (let t = t0; t <= t1; t += stepH * 3600e3) g += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--text-3)">${tstr(new Date(t).toISOString()).replace(/^(\w+) 00:00$/, '$1 00:00')}</text>`;
-  g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)"/>`;
-  if (pts.length) {
-    const d = pts.map((p, i) => (i ? 'L' : 'M') + x(Date.parse(p[0])).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join('');
-    const last = pts[pts.length - 1];
-    g += `<path d="${d}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    g += `<circle cx="${x(Date.parse(last[0]))}" cy="${y(last[1])}" r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2"/>`;
-    g += `<text x="${Math.min(W - 4, x(Date.parse(last[0])) + 9)}" y="${y(last[1]) + 4}" font-size="12" font-weight="600" fill="var(--text)">${eur(last[1], true)}</text>`;
+/* ---------- small helpers ---------- */
+const $ = (id) => document.getElementById(id);
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
   }
-  g += `<g id="hov" style="display:none"><line id="hl" y1="${m.t}" y2="${H - m.b}" stroke="var(--axis)"/><circle id="hd" r="5" fill="var(--series)" stroke="var(--surface)" stroke-width="2"/></g>`;
-  g += `<rect id="hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
-  svg.innerHTML = g;
-  const tip = $('tip'), hit = $('hit'), hov = $('hov');
-  const move = e => {
-    if (!pts.length) return;
-    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
-    let best = 0, bd = 1e18; pts.forEach((p, i) => { const dd = Math.abs(x(Date.parse(p[0])) - px); if (dd < bd) { bd = dd; best = i; } });
-    const p = pts[best], cx = x(Date.parse(p[0])), cy = y(p[1]);
-    hov.style.display = ''; $('hl').setAttribute('x1', cx); $('hl').setAttribute('x2', cx); $('hd').setAttribute('cx', cx); $('hd').setAttribute('cy', cy);
-    tip.style.display = 'block'; tip.innerHTML = `${tstr(p[0])} UTC<br><b>${signed(p[1])}</b>`;
-    const tw = tip.offsetWidth, left = cx / W * r.width + 12;
-    tip.style.left = Math.min(left, r.width - tw - 4) + 'px'; tip.style.top = Math.max(0, cy / H * r.height - 44) + 'px';
-  };
-  hit.addEventListener('pointermove', move);
-  hit.addEventListener('pointerleave', () => { tip.style.display = 'none'; hov.style.display = 'none'; });
-  const tail = pts.slice(-12).reverse();
-  $('histTable').innerHTML = `<thead><tr><th>Time (UTC)</th><th>Total P&amp;L</th></tr></thead><tbody>${tail.map(p => `<tr><td>${tstr(p[0])}</td><td>${signed(p[1])}</td></tr>`).join('')}</tbody>`;
+  for (const k of kids.flat()) if (k != null) e.append(k);
+  return e;
+}
+const svgEl = (tag, attrs) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v); return e; };
+const pad = (n) => String(n).padStart(2, '0');
+const fmtDay = (d) => MON[d.getUTCMonth()] + ' ' + pad(d.getUTCDate());
+const fmtTime = (d) => fmtDay(d) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+const dayKey = (d) => d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+function money(x, signed) {            // €1.23M, €410k, €950 ; signed adds + / −
+  if (x == null || isNaN(x)) return '—';
+  const a = Math.abs(x);
+  const s = a >= 1e6 ? (a / 1e6).toFixed(2) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(0) + 'k' : a.toFixed(0);
+  const sign = signed ? (x >= 0.5 ? '+' : x <= -0.5 ? '−' : '') : (x <= -0.5 ? '−' : '');
+  return sign + '€' + s;
+}
+const compact = (v) => { const a = Math.abs(v); const s = a >= 1e6 ? +(a / 1e6).toFixed(2) + 'M' : a >= 1e3 ? +(a / 1e3).toFixed(0) + 'k' : String(+a.toFixed(0)); return (v < 0 ? '−' : '') + s; };
+const arrow = (x) => (x >= 0 ? '▲ ' : '▼ ');
+function ago(sec) { if (sec == null) return '—'; if (sec < 60) return Math.round(sec) + ' s ago'; if (sec < 3600) return Math.round(sec / 60) + ' min ago'; return Math.round(sec / 3600) + ' h ago'; }
+function nice(mn, mx, cnt) {
+  if (!(mx - mn > 1e-9)) { mn -= 1; mx += 1; }
+  const raw = (mx - mn) / cnt, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw - 1e-12);
+  const lo = Math.floor(mn / step + 1e-9) * step, hi = Math.ceil(mx / step - 1e-9) * step, t = [];
+  for (let v = lo; v <= hi + step * 0.01; v += step) t.push(+v.toFixed(6));
+  return { lo, hi, t };
 }
 
-/* ---------- live mode ---------- */
-function setBadge(text, kind) { $('badgeText').textContent = text; $('badge').className = 'badge ' + (kind || ''); }
-async function poll() {
+/* ---------- API ---------- */
+async function api(path, params) {
+  const u = new URL(API + path, location.origin);
+  for (const [k, v] of Object.entries(params || {})) if (v !== null && v !== undefined && v !== '') u.searchParams.set(k, v);
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(path + ' → ' + r.status);
+  return r.json();
+}
+const lastDay = () => days[days.length - 1];
+function periodParams() {
+  return { from: S.from ? S.from + 'T00:00:00Z' : null, to: (S.to && S.to !== lastDay()) ? S.to + 'T23:59:59Z' : null };
+}
+const grpParams = () => (S.grp && S.dim !== 'none' ? { [S.dim]: S.grp } : {});
+const scopeParams = () => Object.assign(grpParams(), S.stock ? { ticker: S.stock } : {});
+const isSplit = () => S.dim !== 'none' && !S.grp;
+
+/* ---------- loading: the two tiers refresh independently, so a 5 s tick can never cancel a click's hourly refresh ---------- */
+let liveVer = 0, hourVer = 0;
+async function refreshLive() {
+  const v = ++liveVer;
   try {
-    const r = await fetch('api/state', { cache: 'no-store' });
-    if (!r.ok) throw new Error(r.status);
-    state = await r.json();
-    if (mode !== 'live') mode = 'live';
-    setBadge(state.finished ? 'LIVE · FINISHED' : `LIVE · every ${POLL_MS / 1000}s`, state.finished ? 'done' : '');
-    renderSnapshot(state); renderChart(state.history, state.range);
-  } catch (e) {
-    setBadge('DISCONNECTED', 'err');
+    const per = periodParams(), scope = scopeParams(), gp = grpParams();
+    const [status, kpis, stocks, alerts] = await Promise.all([
+      api('status'),
+      api('kpis', Object.assign({ fx: S.fx, from: per.from }, scope)),
+      api('stocks', Object.assign({ fx: S.fx, from: per.from }, gp)),
+      api('alerts', { status: 'all', limit: 200 }),
+    ]);
+    if (v !== liveVer) return;                         // a newer request has started: drop this answer
+    Object.assign(D, { status, kpis, stocks, alerts });
+    renderLive(); setOnline(true);
+  } catch (e) { console.error(e); if (v === liveVer) setOnline(false); }
+}
+async function refreshHourly() {
+  const v = ++hourVer;
+  try {
+    const per = periodParams(), scope = scopeParams(), gp = grpParams();
+    const [curve, contrib] = await Promise.all([
+      api('pnl-curve', Object.assign({ fx: S.fx, dim: isSplit() ? S.dim : 'none', from: per.from, to: per.to }, scope)),
+      isSplit() ? api('contributors', { dim: S.dim, fx: S.fx, from: per.from, to: per.to })
+                : api('contributors', Object.assign({ dim: 'stock', fx: S.fx, from: per.from, to: per.to }, gp)),
+    ]);
+    if (v !== hourVer) return;
+    Object.assign(D, { curve, contrib });
+    renderHourly();
+  } catch (e) { console.error(e); }
+}
+function refresh(hourly) { refreshLive(); if (hourly) refreshHourly(); }
+function setOnline(ok) { $('banner').hidden = ok; $('app').classList.toggle('loading', !ok); }
+function setState(patch) { Object.assign(S, patch); renderControls(); refresh(true); }
+
+/* ---------- controls ---------- */
+function segs(host, items, current, onPick) {
+  host.replaceChildren(...items.map(([k, label]) => el('button', { class: 'seg', type: 'button', 'aria-pressed': String(current === k), text: label, onclick: () => onPick(k) })));
+}
+function renderControls() {
+  segs($('dims'), DIMS, S.dim, (k) => setState({ dim: k, grp: null, stock: null }));
+  segs($('fxs'), [['market', 'Market FX'], ['constant', 'Constant FX']], S.fx, (k) => setState({ fx: k }));
+  $('views').hidden = isSplit();
+  if (!isSplit()) segs($('views'), [['total', 'Total'], ['break', 'Breakdown']], S.view, (k) => { S.view = k; renderControls(); renderHourly(); });
+  const n = days.length;
+  const presets = [['1D', n - 1, n - 1], ['5D', Math.max(0, n - 5), n - 1], ['All', 0, n - 1]];
+  const ai = days.indexOf(S.from), bi = days.indexOf(S.to);
+  $('presets').replaceChildren(...presets.map(([label, a, b]) => el('button', { class: 'seg', type: 'button', 'aria-pressed': String(ai === a && bi === b), text: label, onclick: () => setState({ from: days[a], to: days[b] }) })));
+  for (const [id, cur, key] of [['from', S.from, 'from'], ['to', S.to, 'to']]) {
+    const sel = $(id);
+    if (sel.options.length !== days.length) sel.replaceChildren(...days.map((d) => el('option', { value: d, text: fmtDay(new Date(d + 'T00:00:00Z')) })));
+    sel.value = cur || '';
+    sel.onchange = () => { const o = { from: S.from, to: S.to }; o[key] = sel.value; if (o.from > o.to) { const t = o.from; o.from = o.to; o.to = t; } setState(o); };
   }
-  setTimeout(poll, POLL_MS);
 }
 
-/* ---------- replay mode ---------- */
-function showFrame(i) {
-  frameIdx = i; const f = replay.frames[i];
-  renderSnapshot(f); renderChart(replay.frames.slice(0, i + 1).map(fr => [fr.asof, fr.total]), replay.range);
-  $('scrub').value = i;
-  if (i >= replay.frames.length - 1) { playing = false; $('play').textContent = 'Replay'; setBadge('REPLAY · END', 'done'); }
+/* ---------- live tier ---------- */
+function renderLive() {
+  const st = D.status, k = D.kpis;
+  $('asof').textContent = st.as_of ? 'As of ' + fmtTime(new Date(st.as_of)) + ' UTC · simulated · €' : 'Waiting for data…';
+  const staleN = (D.stocks.items || []).filter((r) => r.in_session && r.price_age_min > STALE_MIN).length;
+  const mark = { ok: ['●', 'OK'], delayed: ['▲', 'delayed'], stale: ['✕', 'down'], unknown: ['?', 'unknown'] };
+  const health = (name, o) => el('span', null, el('span', { class: 'dot ' + o.state, text: mark[o.state][0], 'aria-hidden': 'true' }),
+    name + ' ' + mark[o.state][1] + ' · ' + ago(o.seconds_since_last_message ?? o.seconds_since_last_run));
+  $('health').replaceChildren(health('Feed', st.feed), health('Processor', st.processor),
+    el('span', null, el('span', { class: 'dot ' + (staleN ? 'delayed' : 'ok'), text: staleN ? '▲' : '●', 'aria-hidden': 'true' }), staleN + ' stale price' + (staleN === 1 ? '' : 's')));
+
+  const scope = S.stock ? ' · ' + S.stock : (S.grp ? ' · ' + S.grp : '');
+  $('k1n').textContent = 'Total P&L' + scope;
+  $('k1v').textContent = money(k.total, true);
+  $('k1d').textContent = arrow(k.change_period) + money(k.change_period, true) + ' in period';
+  $('k2v').textContent = money(k.unrealized, true);
+  $('k2d').textContent = k.unrealized_change_1h == null ? '' : arrow(k.unrealized_change_1h) + money(k.unrealized_change_1h, true) + ' last hour';
+  $('k3v').textContent = money(k.realized, true);
+  $('k3d').textContent = Math.abs(k.total) > 1 ? Math.round(k.realized / k.total * 100) + '% of total' : '';
+  $('k4v').textContent = money(k.gross);
+  $('k4d').textContent = 'net ' + money(k.net, true);
+
+  renderTable(); renderAlerts(); renderRisk();
+  renderMarkers();
 }
-function tick() {
-  if (playing && frameIdx < replay.frames.length - 1) { showFrame(frameIdx + 1); setBadge(`REPLAY · ${speed}×`); }
-  setTimeout(tick, 1000 / speed);
+function renderTable() {
+  const items = (D.stocks.items || []).slice();
+  const cols = [['ticker', 'Ticker', 1], ['country', 'Country', 1], ['sector', 'Sector', 1], ['total', 'Total', 0], ['unrealized', 'Unrealized', 0], ['realized', 'Realized', 0], ['change', 'Period Δ', 0], ['age', 'Price', 1]];
+  const val = (r, k) => (k === 'age' ? (r.in_session ? r.price_age_min : -1) : r[k]);
+  items.sort((a, b) => { const x = val(a, S.sortKey), y = val(b, S.sortKey); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * S.sortDir; });
+  $('thead').replaceChildren(...cols.map(([k, label, left]) => el('th', { class: left ? 'l' : '' },
+    el('button', { class: 'thb', type: 'button', text: label + (S.sortKey === k ? (S.sortDir > 0 ? ' ▲' : ' ▼') : ''),
+      onclick: () => { S.sortDir = S.sortKey === k ? -S.sortDir : (left ? 1 : -1); S.sortKey = k; renderTable(); } }))));
+  $('tblTitle').textContent = 'Instruments (' + items.length + ')' + (S.grp ? ' · ' + S.grp : '');
+  $('tbody').replaceChildren(...items.map((r) => {
+    const stale = r.in_session && r.price_age_min > STALE_MIN;
+    const price = stale ? '▲ Stale · ' + Math.round(r.price_age_min) + ' min' : (r.in_session ? 'OK' : 'Closed');
+    return el('tr', { class: S.stock === r.ticker ? 'sel' : '' },
+      el('td', { class: 'l' }, el('button', { class: 'pick', type: 'button', text: r.ticker, title: r.name, 'aria-pressed': String(S.stock === r.ticker), onclick: () => toggleStock(r.ticker) })),
+      el('td', { class: 'l', text: r.country }), el('td', { class: 'l', text: r.sector }),
+      el('td', { text: money(r.total, true), style: 'font-weight:500' }), el('td', { text: money(r.unrealized, true) }),
+      el('td', { text: money(r.realized, true) }), el('td', { text: money(r.change, true) }),
+      el('td', { class: 'l' + (stale ? ' stale' : ''), text: price }));
+  }));
 }
-async function startReplay() {
-  const r = await fetch('replay.json'); replay = await r.json(); mode = 'replay';
-  $('controls').style.display = 'flex'; $('scrub').max = replay.frames.length - 1;
-  $('play').onclick = () => { if (frameIdx >= replay.frames.length - 1) frameIdx = 0; playing = !playing; $('play').textContent = playing ? 'Pause' : 'Play'; setBadge(`REPLAY · ${speed}×`); };
-  $('speed').onclick = () => { speed = speed === 1 ? 4 : speed === 4 ? 16 : 1; $('speed').textContent = speed + '×'; };
-  $('scrub').oninput = e => { playing = false; $('play').textContent = 'Play'; showFrame(Number(e.target.value)); setBadge('REPLAY · PAUSED', 'done'); };
-  showFrame(0); setBadge('REPLAY · 1×'); tick();
+function toggleStock(t) { setState({ stock: S.stock === t ? null : t }); }
+function renderAlerts() {
+  const all = D.alerts.items || [], open = all.filter((a) => !a.cleared_at);
+  const card = $('alertsCard');
+  card.classList.toggle('high', open.some((a) => a.severity === 'high'));
+  const fmtV = (a, v) => (a.rule_id === 'stale_price' ? Math.round(v) + ' min' : money(v));
+  const body = $('alertsBody');
+  if (!open.length) {
+    body.replaceChildren(el('div', { class: 'al' }, el('span', { class: 'sev', style: 'color:var(--ok)', text: '● ' }), 'No open alerts — all rules within limits.'),
+      el('div', { class: 'num hint', text: all.length ? all.length + ' fired earlier, all cleared' : 'Nothing has fired yet' }));
+    return;
+  }
+  const rows = open.slice(0, 4).map((a) => el('div', { class: 'al' },
+    el('span', { class: 'sev ' + a.severity, text: (a.severity === 'high' ? '▲ High' : '● Medium') }),
+    a.description + (a.scope !== 'portfolio' ? ' · ' + a.scope : '') + ': ' + fmtV(a, a.last_value) + ' (limit ' + fmtV(a, a.threshold) + ')',
+    el('small', { class: 'num', text: 'Fired ' + fmtTime(new Date(a.fired_at)) + ' UTC' })));
+  if (open.length > 4) rows.push(el('div', { class: 'hint', text: '+' + (open.length - 4) + ' more open' }));
+  body.replaceChildren(...rows);
+}
+function renderRisk() {
+  const k = D.kpis, items = D.stocks.items || [];
+  const staleN = items.filter((r) => r.in_session && r.price_age_min > STALE_MIN).length, sessionN = items.filter((r) => r.in_session).length;
+  const cards = [
+    ['Drawdown from peak', k.drawdown_eur == null ? '—' : money(k.drawdown_eur), k.peak_eur == null ? '' : 'peak ' + money(k.peak_eur)],
+    ['Open positions', String(items.filter((r) => r.position !== 0).length), 'of ' + items.length + ' instruments'],
+    ['Stale prices', String(staleN), 'of ' + sessionN + ' in session'],
+  ];
+  $('risk').replaceChildren(...cards.map(([l, v, sub]) => el('div', { class: 'card' }, el('span', { class: 'lbl', text: l }), el('div', { class: 'v num', text: v }), el('small', { text: sub }))));
 }
 
-/* ---------- start: live if the API answers, otherwise replay ---------- */
-(async () => {
-  if (forced !== 'replay') {
-    try { const r = await fetch('api/state', { cache: 'no-store' }); if (r.ok) return poll(); } catch (e) {}
+/* ---------- hourly tier: curve + ranking ---------- */
+function assignColors(names, values) {
+  colorOf = new Map();
+  const many = names.length > 6;
+  if (!many) {
+    names.slice().sort().forEach((n, i) => colorOf.set(n, { color: 'var(--s' + (i + 1) + ')', w: 2.5, dash: names.length > 4 ? DASH[i] : 'none' }));
+  } else {                                           // too many for distinct hues: highlight best / worst, grey out the rest
+    const rank = names.slice().sort((a, b) => values[b] - values[a]);
+    names.forEach((n) => colorOf.set(n, { color: 'var(--other)', w: 1.5, dash: 'none' }));
+    colorOf.set(rank[0], { color: 'var(--total)', w: 3, dash: 'none' });
+    colorOf.set(rank[rank.length - 1], { color: 'var(--loss)', w: 3, dash: 'none' });
   }
-  startReplay().catch(() => setBadge('NO DATA', 'err'));
-})();
-addEventListener('resize', () => { if (chartRange) renderChart(chartPts, chartRange); });
+  return many;
+}
+function lastVal(a) { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return 0; }
+
+function buildSeries() {
+  const c = D.curve, split = isSplit();
+  if (!split) {
+    const s0 = c.series[0]; if (!s0) return { series: [], many: false };
+    const out = [{ name: S.fx === 'constant' ? 'Total P&L (constant FX)' : 'Total P&L', color: 'var(--total)', w: 3, dash: 'none', vals: s0.total }];
+    if (S.view === 'break') out.push({ name: 'Realized', color: 'var(--s1)', w: 2, dash: 'none', vals: s0.realized }, { name: 'Unrealized', color: 'var(--s2)', w: 2, dash: '7 5', vals: s0.unrealized });
+    return { series: out, many: false };
+  }
+  const names = c.series.map((s) => s.key), lv = {}; c.series.forEach((s) => { lv[s.key] = lastVal(s.total); });
+  const many = assignColors(names, lv);
+  const order = names.slice().sort((a, b) => lv[b] - lv[a]);
+  return { many, series: order.map((n) => ({ name: n, ...colorOf.get(n), vals: c.series.find((s) => s.key === n).total })) };
+}
+
+function renderHourly() {
+  if (!D.curve) return;
+  renderChart(); renderRank(); renderMarkers();
+  $('chartTitle').textContent = isSplit() ? 'Total P&L (€) by ' + DIMLBL[S.dim] : 'P&L (€) over time';
+  const crumbs = [['All stocks', () => setState({ grp: null, stock: null })]];
+  if (S.grp) crumbs.push([DIMLBL[S.dim][0].toUpperCase() + DIMLBL[S.dim].slice(1) + ': ' + S.grp, () => setState({ stock: null })]);
+  if (S.stock) crumbs.push([S.stock, null]);
+  const kids = [el('span', { text: 'Showing:' })];
+  crumbs.forEach(([label, fn], i) => {
+    const cur = i === crumbs.length - 1;
+    kids.push(el('button', { class: 'crumb', type: 'button', text: label, 'aria-current': String(cur), onclick: cur ? null : fn }));
+    if (!cur) kids.push(el('span', { text: '›' }));
+  });
+  $('crumbs').replaceChildren(...kids);
+}
+
+let hoverIdx = null;
+function renderChart() {
+  const c = D.curve, plot = $('plot'), wrap = $('plotwrap');
+  const { series, many } = buildSeries();
+  const n = c.t.length;
+  plot.replaceChildren();
+  $('legend').replaceChildren(...(many ? [['Best', 'var(--total)', 'solid'], ['Worst', 'var(--loss)', 'solid'], ['Others', 'var(--other)', 'solid']]
+    : series.map((s) => [s.name, s.color, s.dash === 'none' ? 'solid' : (s.dash === '2 4' ? 'dotted' : 'dashed')]))
+    .map(([label, col, style]) => el('span', null, el('i', { style: 'border-top-style:' + style + ';border-top-color:' + col }), label)));
+  if (!n || !series.length) { plot.append(el('div', { class: 'empty', text: 'No data in this period' })); return; }
+
+  const times = c.t.map((t) => new Date(t));
+  let mn = Infinity, mx = -Infinity;
+  series.forEach((s) => s.vals.forEach((v) => { if (v != null) { if (v < mn) mn = v; if (v > mx) mx = v; } }));
+  const sc = nice(mn, mx, 5), y = (v) => (sc.hi - v) / (sc.hi - sc.lo) * 100, x = (i) => (n === 1 ? 50 : i / (n - 1) * 100);
+
+  for (const v of sc.t) plot.append(el('div', { class: 'gl' + (Math.abs(v) < 1e-9 ? ' zero' : ''), style: 'top:' + y(v).toFixed(2) + '%' }, el('span', { class: 'num', text: compact(v) })));
+  // x axis: hours for short ranges, days for long ones
+  const firstIdx = []; times.forEach((t, i) => { if (i === 0 || dayKey(t) !== dayKey(times[i - 1])) firstIdx.push(i); });
+  const xt = [];
+  if (firstIdx.length <= 2) { const step = Math.max(1, Math.ceil(n / 7)); for (let i = 0; i < n; i += step) xt.push([i, pad(times[i].getUTCHours()) + ':00']); }
+  else { const step = Math.ceil(firstIdx.length / 7); for (let k = 0; k < firstIdx.length; k += step) xt.push([firstIdx[k], fmtDay(times[firstIdx[k]])]); }
+  xt.forEach(([i, label]) => plot.append(el('span', { class: 'xt num', style: 'left:' + x(i).toFixed(2) + '%', text: label })));
+
+  const svg = svgEl('svg', { viewBox: '0 0 1000 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+  series.slice().reverse().forEach((s) => {   // draw the first (most important) series last = on top
+    let d = '', pen = false;
+    s.vals.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + (x(i) * 10).toFixed(1) + ' ' + y(v).toFixed(2) + ' '; pen = true; });
+    svg.append(svgEl('path', { d, style: 'stroke:' + s.color + ';stroke-width:' + s.w + ';stroke-dasharray:' + (s.dash === 'none' ? 'none' : s.dash) }));
+  });
+  plot.append(svg);
+
+  // end dots + direct labels (≤4 series: label the line ends; collisions are nudged apart)
+  const label = series.length <= 4 && !many;
+  wrap.classList.toggle('labels', label);
+  const H = plot.clientHeight || 300, ends = [];
+  series.forEach((s) => { const v = s.vals[n - 1]; if (v == null) return; if (many && s.color === 'var(--other)') return; ends.push({ s, v, py: y(v) / 100 * H }); });
+  ends.forEach((e) => plot.append(el('span', { class: 'edot', style: 'left:100%;top:' + e.py.toFixed(1) + 'px;background:' + e.s.color })));
+  if (label) {
+    const sorted = ends.slice().sort((a, b) => a.py - b.py);
+    sorted.forEach((e, i) => { e.ly = e.py; if (i && e.ly < sorted[i - 1].ly + 16) e.ly = sorted[i - 1].ly + 16; });
+    sorted.forEach((e) => plot.append(el('span', { class: 'elab', style: 'top:' + e.ly.toFixed(1) + 'px' },
+      series.length === 1 || !isSplit() ? el('b', { class: 'num', text: money(e.v, true) + ' ' }) : null, series.length > 1 ? e.s.name : '')));
+  }
+  plot.append(el('div', { class: 'cross', id: 'cross' }), el('div', { class: 'tip', id: 'tip' }));
+  const hit = el('div', { class: 'hit', id: 'hit', tabindex: '0', role: 'img', 'aria-label': 'P&L chart. Use the left and right arrow keys to read values.' });
+  plot.append(hit);
+
+  const show = (i) => {
+    i = Math.max(0, Math.min(n - 1, i)); hoverIdx = i;
+    const cross = $('cross'), tip = $('tip');
+    cross.style.left = x(i) + '%'; cross.style.display = 'block';
+    const isNow = c.live_index != null && i === n - 1;
+    const rows = series.filter((s) => s.vals[i] != null).sort((a, b) => b.vals[i] - a.vals[i]);
+    tip.replaceChildren(el('div', { class: 'th', text: (isNow ? 'Now · ' : '') + fmtTime(times[i]) + ' UTC' }),
+      ...rows.map((s) => el('div', { class: 'tr' }, el('i', { style: 'border-top-color:' + s.color + ';border-top-style:' + (s.dash === 'none' ? 'solid' : s.dash === '2 4' ? 'dotted' : 'dashed') }),
+        el('span', { class: 'tn', text: s.name }), el('span', { class: 'tv num', text: money(s.vals[i], true) }))));
+    tip.style.display = 'block';
+    const right = x(i) > 55;
+    tip.style.left = right ? 'auto' : 'calc(' + x(i) + '% + 12px)'; tip.style.right = right ? 'calc(' + (100 - x(i)) + '% + 12px)' : 'auto';
+  };
+  const hide = () => { hoverIdx = null; $('cross').style.display = 'none'; $('tip').style.display = 'none'; };
+  hit.addEventListener('pointermove', (ev) => { const r = hit.getBoundingClientRect(); show(Math.round((ev.clientX - r.left) / r.width * (n - 1))); });
+  hit.addEventListener('pointerleave', hide);
+  hit.addEventListener('blur', hide);
+  hit.addEventListener('keydown', (ev) => { if (ev.key === 'ArrowLeft') { show((hoverIdx ?? n) - 1); ev.preventDefault(); } if (ev.key === 'ArrowRight') { show((hoverIdx ?? -1) + 1); ev.preventDefault(); } if (ev.key === 'Escape') hide(); });
+  c._times = times; c._x = x;
+}
+
+// dashed vertical line where a portfolio drawdown alert fired (only on the whole-portfolio chart)
+function renderMarkers() {
+  const plot = $('plot'), c = D.curve;
+  plot.querySelectorAll('.amark, .atag').forEach((e) => e.remove());
+  if (!c || !c._times || isSplit() || S.grp || S.stock || !D.alerts) return;
+  const t0 = c._times[0], t1 = c._times[c._times.length - 1], n = c._times.length;
+  const fired = (D.alerts.items || []).filter((a) => a.rule_id === 'drawdown' && a.scope === 'portfolio' && new Date(a.fired_at) >= t0 && new Date(a.fired_at) <= t1);
+  fired.slice(0, 3).forEach((a) => {
+    const ft = new Date(a.fired_at); let bi = 0;
+    c._times.forEach((t, i) => { if (Math.abs(t - ft) < Math.abs(c._times[bi] - ft)) bi = i; });
+    const left = c._x(bi).toFixed(2) + '%';
+    plot.insertBefore(el('div', { class: 'amark', style: 'left:' + left }), $('cross'));
+    plot.insertBefore(el('div', { class: 'atag', style: 'left:' + left, text: fmtTime(ft) + ' · drawdown alert' }), $('cross'));
+  });
+}
+
+function renderRank() {
+  const items = D.contrib.items || [], host = $('rank'), split = isSplit();
+  const mxOf = (list) => Math.max(0.01, ...list.map((r) => Math.abs(r.change)));
+  const row = (r, mx, sw, onPick, selected) => el('div', { class: 'rrow' + (selected ? ' sel' : '') },
+    el('span', { class: 'sw', style: 'background:' + (sw || 'transparent') }),
+    el('button', { class: 'pick', type: 'button', text: r.key, title: r.key, onclick: onPick }),
+    el('div', { class: 'bar' }, el('div', { style: 'width:' + (Math.abs(r.change) / mx * 100).toFixed(0) + '%;background:' + (r.change < 0 ? 'var(--loss)' : 'var(--gain)') })),
+    el('span', { class: 'rv num', text: money(r.change, true) }));
+  if (split) {
+    $('rankTitle').textContent = 'Contribution by ' + DIMLBL[S.dim];
+    $('rankHint').textContent = 'How much each ' + DIMLBL[S.dim] + ' added to (or took from) total P&L in the selected period. Click one to drill into its stocks.';
+    const mx = mxOf(items);
+    host.replaceChildren(...items.map((r) => row(r, mx, (colorOf.get(r.key) || {}).color, () => setState({ grp: r.key, stock: null }), false)));
+  } else {
+    $('rankTitle').textContent = 'Contribution by stock';
+    $('rankHint').textContent = 'How much each stock added to (or took from) total P&L in the selected period' + (S.grp ? ', within ' + S.grp : '') + '. Click one to chart it alone; click it again to go back.';
+    const gain = items.filter((r) => r.change >= 0).slice(0, 5), loss = items.filter((r) => r.change < 0).slice(-5).reverse(), mx = mxOf(gain.concat(loss));
+    const hd = (t) => el('div', { class: 'rrow hd', text: t });
+    host.replaceChildren(hd('Biggest gains'), ...gain.map((r) => row(r, mx, null, () => toggleStock(r.key), S.stock === r.key)),
+      hd('Biggest losses'), ...loss.map((r) => row(r, mx, null, () => toggleStock(r.key), S.stock === r.key)));
+  }
+}
+
+/* ---------- start ---------- */
+async function init() {
+  renderControls();
+  for (;;) {                                           // wait for the API (and for the first data) before drawing anything
+    try {
+      D.meta = await api('meta');
+      if (D.meta.range && D.meta.range.first_snapshot) break;
+      $('asof').textContent = 'Waiting for the first hourly snapshot…';
+    } catch (e) { setOnline(false); }
+    await new Promise((r) => setTimeout(r, TICK_MS));
+  }
+  const a = new Date(D.meta.range.first_snapshot), b = new Date(D.meta.range.last_snapshot);
+  for (let d = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate())); d <= b; d = new Date(d.getTime() + 86400000)) {
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) days.push(dayKey(d));
+  }
+  S.from = days[0]; S.to = lastDay();
+  renderControls();
+  await Promise.all([refreshLive(), refreshHourly()]);
+  setInterval(() => { tickN++; refresh(tickN % HOURLY_EVERY === 0); }, TICK_MS);
+}
+window.addEventListener('resize', () => { if (D.curve) renderChart(), renderMarkers(); });
+init();
 </script>
 </body>
 </html>

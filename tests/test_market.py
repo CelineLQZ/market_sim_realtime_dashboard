@@ -29,10 +29,10 @@ def ts(s):
 
 
 def test_reference_data_is_consistent():
-    assert len(INSTRUMENTS) == 23
-    assert len({i.instrument_id for i in INSTRUMENTS}) == 23
-    assert len({i.short_name for i in INSTRUMENTS}) == 23
-    assert Counter(i.type for i in INSTRUMENTS) == {"equity": 20, "currency": 3}
+    assert len(INSTRUMENTS) == 33
+    assert len({i.instrument_id for i in INSTRUMENTS}) == 33
+    assert len({i.short_name for i in INSTRUMENTS}) == 33
+    assert Counter(i.type for i in INSTRUMENTS) == {"equity": 30, "currency": 3}
     assert {i.exchange for i in INSTRUMENTS} <= set(SESSIONS_UTC)
     assert all(i.start_price > 0 and i.annual_vol > 0 for i in INSTRUMENTS)
 
@@ -176,7 +176,7 @@ def test_realised_volatility_matches_configured_volatility():
             continue
         realised = np.log(prices[1:] / prices[:-1]).std() * np.sqrt(252)
         ratios.append(realised / BY_ID[iid].annual_vol)
-    assert len(ratios) >= 20
+    assert len(ratios) >= 25
     assert 0.85 < float(np.mean(ratios)) < 1.3     # calibrated, with sampling noise
 
 
