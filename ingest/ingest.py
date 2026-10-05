@@ -1,11 +1,14 @@
 """ingest 层：把模拟器发来的每一行消息，原样存进 PostgreSQL 的 raw.events。
 
 原则：不解析、不校验、不去重。收到什么就存什么（重复行、乱码行也照存）。
-运行：  python ingest/ingest.py
+运行：  python ingest/ingest.py          一直接收，Ctrl-C 或 kill 停止（会先把手里的行写完）
+        python ingest/ingest.py --init   只建 raw 层的表就退出（make schema 用）
 前提：  PostgreSQL 已启动且数据库存在；模拟器在 localhost:1337 运行。
 """
 import os
+import signal
 import socket
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -63,8 +66,13 @@ def flush(conn, run_id, rows):
 
 
 def main():
+    # make down / docker stop 发来的是 SIGTERM：让它和 Ctrl-C 一样，走下面的 KeyboardInterrupt 分支，先把手里的行写完再退出
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     with psycopg.connect(DB) as conn:
         conn.execute(SCHEMA)  # 先建好库表
+        if "--init" in sys.argv:
+            print("raw 层已建好")
+            return
         run_id = conn.execute("insert into raw.ingest_runs default values returning run_id").fetchone()[0]
         conn.commit()
 

@@ -16,5 +16,9 @@ create table if not exists clean.instruments (
     currency      text
 );
 
+-- 清空和导入放在同一个事务里：truncate 会锁住这张表直到提交，所以 processor 同时在跑时，
+-- 它要么等一下，要么看到完整的新数据，不会撞上"表是空的"那一瞬间而把行误判成未知标的。
+begin;
 truncate clean.instruments;                                   -- 先清空，重复执行不会出现重复行
 \copy clean.instruments from 'data/instruments.csv' csv header   -- 把 CSV 读进表（第一行是列名，跳过）
+commit;

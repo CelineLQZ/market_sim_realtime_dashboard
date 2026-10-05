@@ -14,6 +14,7 @@
 """
 import argparse
 import os
+import signal
 import sys
 import time
 from datetime import datetime, time as dtime, timezone
@@ -68,6 +69,7 @@ def main():
                     help="两轮之间的间隔秒数（默认 5）")
     ap.add_argument("--once", action="store_true", help="只跑一轮就退出")
     args = ap.parse_args()
+    signal.signal(signal.SIGTERM, signal.default_int_handler)   # make down / docker stop：和 Ctrl-C 一样，正常收尾后退出
 
     conn, fails, state, last_beat = None, 0, {}, 0.0
     log(f"processor 启动：每 {args.interval:g} 秒一轮" if not args.once else "processor 启动：只跑一轮")

@@ -256,7 +256,7 @@ const DASH = ['none', '7 5', 'none', '2 4', 'none', '7 5', 'none', '2 4'];
 const DIMS = [['none','None'], ['country','Country'], ['sector','Sector'], ['exchange','Exchange'], ['currency','Currency']];
 const DIMLBL = { country: 'country', sector: 'sector', exchange: 'exchange', currency: 'currency' };
 
-const S = { fx: 'market', dim: 'none', view: 'total', from: null, to: null, grp: null, stock: null, sortKey: 'total', sortDir: -1 };
+const S = { fx: 'market', dim: 'none', view: 'total', from: null, to: null, preset: 'All', grp: null, stock: null, sortKey: 'total', sortDir: -1 };
 const D = { meta: null, status: null, kpis: null, stocks: null, alerts: null, curve: null, contrib: null };
 let days = [], ver = 0, tickN = 0, colorOf = new Map();
 
@@ -274,7 +274,8 @@ function el(tag, props, ...kids) {
 const svgEl = (tag, attrs) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v); return e; };
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDay = (d) => MON[d.getUTCMonth()] + ' ' + pad(d.getUTCDate());
-const fmtTime = (d) => fmtDay(d) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+const fmtDayY = (d) => fmtDay(d) + ', ' + d.getUTCFullYear();
+const fmtTime = (d) => fmtDayY(d) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
 const dayKey = (d) => d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
 function money(x, signed) {            // €1.23M, €410k, €950 ; signed adds + / −
   if (x == null || isNaN(x)) return '—';
@@ -304,6 +305,24 @@ async function api(path, params) {
   return r.json();
 }
 const lastDay = () => days[days.length - 1];
+// 1D / 5D / All 是"跟随最新"的：新的一天出现后，范围会跟着往后走
+function presetRange(label) {
+  const n = days.length, a = label === '1D' ? n - 1 : label === '5D' ? Math.max(0, n - 5) : 0;
+  return { preset: label, from: days[a], to: lastDay() };
+}
+// 根据 /api/meta 的快照范围重建日期列表。返回 true 表示列表变了
+function syncDays(range) {
+  if (!range || !range.first_snapshot) return false;
+  const a = new Date(range.first_snapshot), b = new Date(range.last_snapshot), next = [];
+  for (let d = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate())); d <= b; d = new Date(d.getTime() + 86400000))
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) next.push(dayKey(d));
+  if (next.length === days.length && next[next.length - 1] === lastDay()) return false;
+  const followEnd = S.to === null || S.to === lastDay();
+  days.splice(0, days.length, ...next);
+  if (S.preset) Object.assign(S, presetRange(S.preset));
+  else if (followEnd) S.to = lastDay();
+  return true;
+}
 function periodParams() {
   return { from: S.from ? S.from + 'T00:00:00Z' : null, to: (S.to && S.to !== lastDay()) ? S.to + 'T23:59:59Z' : null };
 }
@@ -356,14 +375,12 @@ function renderControls() {
   $('views').hidden = isSplit();
   if (!isSplit()) segs($('views'), [['total', 'Total'], ['break', 'Breakdown']], S.view, (k) => { S.view = k; renderControls(); renderHourly(); });
   const n = days.length;
-  const presets = [['1D', n - 1, n - 1], ['5D', Math.max(0, n - 5), n - 1], ['All', 0, n - 1]];
-  const ai = days.indexOf(S.from), bi = days.indexOf(S.to);
-  $('presets').replaceChildren(...presets.map(([label, a, b]) => el('button', { class: 'seg', type: 'button', 'aria-pressed': String(ai === a && bi === b), text: label, onclick: () => setState({ from: days[a], to: days[b] }) })));
+  $('presets').replaceChildren(...['1D', '5D', 'All'].map((label) => el('button', { class: 'seg', type: 'button', 'aria-pressed': String(S.preset === label), text: label, onclick: () => setState(presetRange(label)) })));
   for (const [id, cur, key] of [['from', S.from, 'from'], ['to', S.to, 'to']]) {
     const sel = $(id);
-    if (sel.options.length !== days.length) sel.replaceChildren(...days.map((d) => el('option', { value: d, text: fmtDay(new Date(d + 'T00:00:00Z')) })));
+    if (sel.options.length !== days.length) sel.replaceChildren(...days.map((d) => el('option', { value: d, text: fmtDayY(new Date(d + 'T00:00:00Z')) })));
     sel.value = cur || '';
-    sel.onchange = () => { const o = { from: S.from, to: S.to }; o[key] = sel.value; if (o.from > o.to) { const t = o.from; o.from = o.to; o.to = t; } setState(o); };
+    sel.onchange = () => { const o = { from: S.from, to: S.to, preset: null }; o[key] = sel.value; if (o.from > o.to) { const t = o.from; o.from = o.to; o.to = t; } setState(o); };
   }
 }
 
@@ -607,14 +624,17 @@ async function init() {
     } catch (e) { setOnline(false); }
     await new Promise((r) => setTimeout(r, TICK_MS));
   }
-  const a = new Date(D.meta.range.first_snapshot), b = new Date(D.meta.range.last_snapshot);
-  for (let d = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate())); d <= b; d = new Date(d.getTime() + 86400000)) {
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) days.push(dayKey(d));
-  }
-  S.from = days[0]; S.to = lastDay();
+  syncDays(D.meta.range);
   renderControls();
   await Promise.all([refreshLive(), refreshHourly()]);
-  setInterval(() => { tickN++; refresh(tickN % HOURLY_EVERY === 0); }, TICK_MS);
+  setInterval(async () => {
+    tickN++;
+    const hourly = tickN % HOURLY_EVERY === 0;
+    if (hourly) {                                      // 日期列表随数据增长：每 30 秒更新一次
+      try { D.meta = await api('meta'); if (syncDays(D.meta.range)) renderControls(); } catch (e) { console.error(e); }
+    }
+    refresh(hourly);
+  }, TICK_MS);
 }
 window.addEventListener('resize', () => { if (D.curve) renderChart(), renderMarkers(); });
 init();
