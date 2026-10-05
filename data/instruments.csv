@@ -1,0 +1,24 @@
+instrument_id,long_name,short_name,country,sector,industry,exchange,type,currency
+eccd7e6f-8b1b-5baa-a744-091c1690363d,Tulpenveld Semiconductors N.V.,TLPV,Netherlands,Technology,Semiconductors,XAMS,equity,EUR
+78813941-ebe2-54c2-b0af-37d4a1a5a574,Grachtwerk Bank N.V.,GCBK,Netherlands,Financials,Banking,XAMS,equity,EUR
+9a16a1e2-a9fc-57f7-a683-4285cc36c4a4,Noordzee Energie N.V.,NZEN,Netherlands,Energy,Offshore Wind,XAMS,equity,EUR
+005cccda-41c6-5bd1-99a7-b3fa0d68bb28,Klaverhof Foods N.V.,KLHF,Netherlands,Consumer Staples,Packaged Food,XAMS,equity,EUR
+92c461f0-7f69-5fce-97ea-ee8a33c056d9,Delta Havenlogistiek N.V.,DHLG,Netherlands,Industrials,Port Logistics,XAMS,equity,EUR
+09a8580f-0cee-5460-adfb-c39e3b3eded8,Brightwave Software Inc.,BWSW,United States,Technology,Enterprise Software,XNYS,equity,USD
+4427ea05-2e05-58de-abb8-65da8734e5e8,Ironbridge Capital Corp.,IBCC,United States,Financials,Asset Management,XNYS,equity,USD
+4e747b31-a82c-57b9-8e00-b1ecbe3fb3a6,Redrock Petroleum Co.,RRPC,United States,Energy,Oil & Gas,XNYS,equity,USD
+fcb381b9-a8c1-569f-967c-4e2852d17b62,Maple Harvest Brands Inc.,MHVB,United States,Consumer Staples,Beverages,XNYS,equity,USD
+5d6c61a8-8d9d-590e-9fc3-e0886f0e6fcb,Summit Biologics Inc.,SMBL,United States,Health Care,Biotechnology,XNYS,equity,USD
+a8b315ea-0663-5d51-893f-2625a9db9054,Thameside Insurance plc,THIN,United Kingdom,Financials,Insurance,XLON,equity,GBP
+49adbebf-11bc-57e2-9944-40758487be3a,Northgate Retail plc,NGRT,United Kingdom,Consumer Discretionary,Retail,XLON,equity,GBP
+9d7cff26-8070-5812-86ad-c3a72d735ce6,Albion Aerospace plc,ALAE,United Kingdom,Industrials,Aerospace,XLON,equity,GBP
+d9dd3ce5-8a77-591b-a6f0-87699d0209ee,Wessex Water & Power plc,WXWP,United Kingdom,Utilities,Water & Electric,XLON,equity,GBP
+f4e8baf0-0a08-5e88-a157-c449353f320c,Kestrel Pharma plc,KSPH,United Kingdom,Health Care,Pharmaceuticals,XLON,equity,GBP
+86ba6130-7f4d-5621-835b-4db1646785c0,Sakuraworks Robotics Co.,SKRB,Japan,Industrials,Industrial Robotics,XTKS,equity,JPY
+5a29485f-a96d-571d-947e-59880148ab7b,Fujimi Motors Corp.,FJMM,Japan,Consumer Discretionary,Automobiles,XTKS,equity,JPY
+6713916a-8064-5a8a-b5c9-3a9d96bb1df1,Hoshizora Electronics Co.,HSZE,Japan,Technology,Consumer Electronics,XTKS,equity,JPY
+7b19ec05-b5d0-51bf-86ba-3ebda74a47db,Kaido Railways Co.,KDRW,Japan,Industrials,Rail Transport,XTKS,equity,JPY
+79c3a0fe-8e0a-51fd-97b7-8be7a6bb3730,Midori Chemicals Co.,MDCH,Japan,Materials,Specialty Chemicals,XTKS,equity,JPY
+90687094-e834-5deb-9de9-78cf761a91ee,Euro / US Dollar,EUR/USD,Eurozone,Currency,Foreign Exchange,FX,currency,USD
+4f7ebd5e-97b4-5ee8-a434-2a0adca06c65,Pound Sterling / US Dollar,GBP/USD,United Kingdom,Currency,Foreign Exchange,FX,currency,USD
+904be1e7-ca56-5523-a74f-96576c8fc0c9,US Dollar / Japanese Yen,USD/JPY,United States,Currency,Foreign Exchange,FX,currency,JPY
