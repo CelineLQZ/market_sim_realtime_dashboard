@@ -1,10 +1,14 @@
--- clean 层：把 raw.events 里的原始行，解析、检查、去重，分流到三张表
+-- clean 层（增量版）：每次运行，只处理上次运行之后新到达 raw.events 的行
 --   好的 trade  -> clean.trades
 --   好的 price  -> clean.prices
 --   坏的行      -> clean.dead_letter（原文 + 原因）
--- 运行：psql marketsim -f sql/02_clean.sql    （可以重复执行，结果不变）
+--   同一标的同一时刻、价格却不同的报价 -> 先到的进 clean.prices，后到的进 dead_letter（conflicting_price）
+--
+-- 运行：psql marketsim -v ON_ERROR_STOP=1 -f sql/02_clean.sql
+--   - 可以反复运行：没有新数据时什么都不会改变。
+--   - 想把 clean 层从头重算（清洗规则改了、改了表结构、修复错误）：运行 sql/03_backfill_clean.sql
 
--- ============ 1. 建表 ============
+-- ============ 1. 建表（已经存在就跳过，不会动里面的数据） ============
 create schema if not exists clean;
 
 create table if not exists clean.trades (
@@ -23,7 +27,7 @@ create table if not exists clean.prices (
     event_time    timestamptz not null,
     price         numeric     not null,
     raw_id        bigint      not null,
-    primary key (instrument_id, event_time, price)   -- 报价没有自己的 id，所以三个字段合起来当主键
+    primary key (instrument_id, event_time)   -- 报价没有自己的 id：同一标的、同一时刻只保留一个价格
 );
 
 create table if not exists clean.dead_letter (
@@ -33,7 +37,16 @@ create table if not exists clean.dead_letter (
     received_at timestamptz not null
 );
 
+-- 进度表：永远只有一行，记录"raw_id 处理到多少了"。下次运行从它后面接着处理。
+create table if not exists clean.process_state (
+    id          int primary key default 1 check (id = 1),   -- check 保证只能有这一行
+    last_raw_id bigint      not null default 0,
+    updated_at  timestamptz not null default now()
+);
+insert into clean.process_state (id) values (1) on conflict do nothing;
+
 -- ============ 2. 解析和检查（用一个视图把逻辑集中在一处） ============
+-- 视图只是一段"保存下来的查询"，本身不存数据。下面用的时候会加上 raw_id 范围，所以只会解析新行。
 create or replace view clean.v_parsed as
 with step1 as (      -- 第 1 步：这一行能不能解析成 JSON？（乱码行在这里变成 null）
     select raw_id, received_at, payload,
@@ -73,17 +86,32 @@ select s.raw_id, s.received_at, s.payload, s.type, s.trade_id, s.instrument_id,
            when s.type = 'trade' and s.side is null           then 'bad_side'
            when s.type = 'trade' and s.side not in ('BUY','SELL') then 'bad_side'
            when i.instrument_id is null                       then 'unknown_instrument'  -- 关联问题：dim 表里查不到
+           when s.type = 'trade' and s.currency is distinct from i.currency then 'currency_mismatch'  -- 币种和标的自己的币种不一致（null 也算不一致）
        end as reason
 from step2 s
 left join clean.instruments i on i.instrument_id = s.instrument_id;
 
--- ============ 3. 分流写入 ============
--- on conflict do nothing：主键已经存在就跳过，这就是"去重"。
--- order by raw_id：重复的行里，保留最早到达的那一行。
+-- ============ 3. 本次运行：整个过程放在一个事务里，要么全部成功，要么全部不算 ============
+begin;
+
+-- 圈定本次要处理的范围：(lo, hi] ，即 raw_id 大于 lo 且不超过 hi。
+--   lo = 上次处理到哪里（来自进度表）
+--   hi = 现在 raw 里最大的 raw_id。先固定下来：运行期间 ingest 又写进来的新行，留给下一次。
+create temp table _range on commit drop as
+select s.last_raw_id as lo,
+       greatest(s.last_raw_id, (select coalesce(max(raw_id), 0) from raw.events)) as hi
+from clean.process_state s;
+
+-- ---- 分流写入 ----
+-- on conflict do nothing：主键已经存在就跳过，这就是"去重"。主键覆盖所有历史行，
+-- 所以第二天到达的重复消息，也会和前几天写入的行冲突并被去掉。
+-- order by raw_id：同一批里重复的行，保留最早到达的那一行。
 insert into clean.trades (trade_id, instrument_id, event_time, price, volume, side, currency, raw_id)
 select trade_id, instrument_id, event_time, price, volume, side, currency, raw_id
 from clean.v_parsed
 where reason is null and type = 'trade'
+  and raw_id >  (select lo from _range)
+  and raw_id <= (select hi from _range)
 order by raw_id
 on conflict do nothing;
 
@@ -91,23 +119,80 @@ insert into clean.prices (instrument_id, event_time, price, raw_id)
 select instrument_id, event_time, price, raw_id
 from clean.v_parsed
 where reason is null and type = 'price'
+  and raw_id >  (select lo from _range)
+  and raw_id <= (select hi from _range)
 order by raw_id
 on conflict do nothing;
 
+-- 坏行：格式或取值有问题的行
 insert into clean.dead_letter (raw_id, reason, payload, received_at)
 select raw_id, reason, payload, received_at
 from clean.v_parsed
 where reason is not null
+  and raw_id >  (select lo from _range)
+  and raw_id <= (select hi from _range)
 on conflict do nothing;
 
--- ============ 4. 对账：每一行 raw 都要有去处 ============
-select
-    (select count(*) from raw.events)                          as raw_rows,
-    (select count(*) from clean.dead_letter)                   as bad_rows,
-    (select count(*) from clean.v_parsed where reason is null) as good_rows,
-    (select count(*) from clean.trades) + (select count(*) from clean.prices) as kept_rows,
-    (select count(*) from clean.v_parsed where reason is null)
-      - (select count(*) from clean.trades) - (select count(*) from clean.prices) as duplicates_dropped,
-    (select count(*) from raw.events)
-      = (select count(*) from clean.dead_letter)
-      + (select count(*) from clean.v_parsed where reason is null) as balanced;
+-- 冲突的报价：同一标的、同一时刻已经有一个价格了（可能是今天的，也可能是前几天留下的），而这一条的价格不一样。
+-- 价格也一样的是"完全重复"，上面的 on conflict 已经安静地去掉了，不算冲突，不进 dead_letter。
+insert into clean.dead_letter (raw_id, reason, payload, received_at)
+select v.raw_id, 'conflicting_price', v.payload, v.received_at
+from clean.v_parsed v
+join clean.prices p on p.instrument_id = v.instrument_id and p.event_time = v.event_time
+where v.reason is null and v.type = 'price'
+  and v.raw_id >  (select lo from _range)
+  and v.raw_id <= (select hi from _range)
+  and v.raw_id <> p.raw_id          -- 不是留下来的那一条本身
+  and v.price   <> p.price          -- 价格不同，才算冲突
+on conflict do nothing;
+
+-- 记下"处理到哪里了"。和上面的写入在同一个事务里，所以不会出现"写入了但进度没更新"。
+update clean.process_state
+set last_raw_id = (select hi from _range), updated_at = now();
+
+-- ============ 4. 对账：本次处理的每一行 raw 都要有去处 ============
+-- 第一层：本次的 raw 行数 = 坏行 + 好行
+-- 第二层：好行 = 新保留 + 冲突报价 + 完全重复（三个数分别独立数出来，不是用减法凑的）
+with rng as (select lo, hi from _range),
+raw_new as (
+    select e.raw_id from raw.events e, rng where e.raw_id > rng.lo and e.raw_id <= rng.hi
+),
+good as (
+    select v.* from clean.v_parsed v, rng
+    where v.reason is null and v.raw_id > rng.lo and v.raw_id <= rng.hi
+),
+bad as (
+    select d.raw_id from clean.dead_letter d, rng
+    where d.reason <> 'conflicting_price' and d.raw_id > rng.lo and d.raw_id <= rng.hi
+),
+confl as (
+    select d.raw_id from clean.dead_letter d, rng
+    where d.reason = 'conflicting_price' and d.raw_id > rng.lo and d.raw_id <= rng.hi
+),
+kept as (
+    select t.raw_id from clean.trades t, rng where t.raw_id > rng.lo and t.raw_id <= rng.hi
+    union all
+    select p.raw_id from clean.prices p, rng where p.raw_id > rng.lo and p.raw_id <= rng.hi
+),
+dups as (
+    select g.raw_id from good g join clean.trades t on t.trade_id = g.trade_id
+    where g.type = 'trade' and g.raw_id <> t.raw_id
+    union all
+    select g.raw_id from good g
+    join clean.prices p on p.instrument_id = g.instrument_id and p.event_time = g.event_time
+    where g.type = 'price' and g.raw_id <> p.raw_id and g.price = p.price
+)
+select rng.lo + 1                       as from_raw_id,
+       rng.hi                           as to_raw_id,
+       (select count(*) from raw_new)   as raw_rows,
+       (select count(*) from bad)       as bad_rows,
+       (select count(*) from good)      as good_rows,
+       (select count(*) from kept)      as kept_rows,
+       (select count(*) from confl)     as conflicting_prices,
+       (select count(*) from dups)      as duplicates_dropped,
+       (select count(*) from raw_new) = (select count(*) from bad) + (select count(*) from good)
+       and (select count(*) from good)  = (select count(*) from kept) + (select count(*) from confl)
+                                        + (select count(*) from dups)  as balanced
+from rng;
+
+commit;
