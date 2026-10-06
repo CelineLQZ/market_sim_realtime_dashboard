@@ -10,7 +10,7 @@
 运行：  python pipeline/processor.py              一直运行，Ctrl-C 停止
         python pipeline/processor.py --once       只跑一轮就退出（测试、手动补跑）
         python pipeline/processor.py --interval 2 每 2 秒一轮（默认 5 秒，也可以用环境变量 PROCESS_INTERVAL）
-前提：  PostgreSQL 已启动；sql/01、02、04、05 已经运行过（建好表和函数）。
+前提：  PostgreSQL 已启动；sql/clean/install.sql 和 sql/gold/install.sql 已经运行过（建好表和函数）。
 """
 import argparse
 import os
@@ -96,7 +96,7 @@ def main():
         except (psycopg.errors.UndefinedFunction, psycopg.errors.InvalidSchemaName,
                 psycopg.errors.UndefinedTable) as e:
             # schema、表或函数还没建好：不是"稍后重试"能解决的小问题，提示该运行哪些文件
-            log(f"出错：{e}\n    请先运行 sql/02_clean.sql 和 sql/05_gold.sql（建表和函数）")
+            log(f"出错：{e}\n    请先运行 sql/clean/install.sql 和 sql/gold/install.sql（建表和函数）")
             fails += 1
         except psycopg.Error as e:
             log(f"出错：{str(e).strip()}")

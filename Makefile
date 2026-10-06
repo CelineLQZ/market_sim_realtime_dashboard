@@ -42,11 +42,8 @@ db: ## 创建数据库（已经存在就跳过）
 
 schema: db ## 建表、建函数、载入参考数据（可以反复运行，不会动已有的数据）
 	@$(PY) ingest/ingest.py --init
-	@$(PSQL) -f sql/01_instruments.sql
-	@$(PSQL) -f sql/02_clean.sql
-	@$(PSQL) -f sql/04_exchange_sessions.sql
-	@$(PSQL) -f sql/05_gold.sql
-	@$(PSQL) -f sql/07_quality.sql
+	@$(PSQL) -f sql/clean/install.sql
+	@$(PSQL) -f sql/gold/install.sql
 	@echo "  表和函数已就绪"
 
 # ---------------- 一条命令启动 / 停止 ----------------
@@ -102,8 +99,8 @@ backfill: ## 清洗层和 gold 层从头重算（规则或公式改了之后用�
 	@for n in processor ingest; do \
 	  if [ -f $(RUN)/$$n.pid ] && kill -0 $$(cat $(RUN)/$$n.pid) 2>/dev/null; then echo "  请先 make down（$$n 还在运行）"; exit 1; fi; \
 	done
-	$(PSQL) -f sql/03_backfill.sql
-	$(PSQL) -f sql/06_backfill_gold.sql
+	$(PSQL) -f sql/clean/backfill.sql
+	$(PSQL) -f sql/gold/backfill.sql
 
 reset: down ## 删除数据库里的全部数据，从头开始（会先让你确认；加 YES=1 跳过确认）
 	@[ "$(YES)" = "1" ] || { read -p "  这会删除数据库 $(DB) 的全部数据。输入 yes 继续：" a; [ "$$a" = yes ] || { echo "  已取消"; exit 1; }; }

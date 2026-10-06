@@ -1,5 +1,5 @@
--- 参考数据：把 instruments.csv 载入数据库（一次性，可重复执行）
--- 运行：在 market-sim 文件夹里执行  psql marketsim -f sql/01_instruments.sql
+-- clean 层 · 1/5 参考数据：把 instruments.csv 载入数据库（一次性，可重复执行）
+-- 运行：在 market-sim 文件夹里执行  psql marketsim -f sql/clean/01_instruments.sql
 
 create schema if not exists clean;
 

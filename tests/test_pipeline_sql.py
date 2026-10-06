@@ -35,8 +35,8 @@ def conn():
     subprocess.run(["createdb", name], check=True)
     env = {**os.environ, "DATABASE_URL": f"dbname={name}", "PGOPTIONS": "-c client_min_messages=warning"}
     subprocess.run([sys.executable, "ingest/ingest.py", "--init"], cwd=ROOT, env=env, check=True)
-    for f in ("01_instruments", "02_clean", "04_exchange_sessions", "05_gold", "07_quality"):
-        subprocess.run(["psql", f"dbname={name}", "-v", "ON_ERROR_STOP=1", "-q", "-f", f"sql/{f}.sql"], cwd=ROOT, env=env, check=True)
+    for f in ("clean", "gold"):
+        subprocess.run(["psql", f"dbname={name}", "-v", "ON_ERROR_STOP=1", "-q", "-f", f"sql/{f}/install.sql"], cwd=ROOT, env=env, check=True)
     c = psycopg.connect(f"dbname={name}", autocommit=True)
     yield c
     c.close()
@@ -58,7 +58,7 @@ def step(c):
     return clean, gold
 
 
-def test_quality_logs_and_late_data_restatement(conn):
+def test_bad_rows_duplicates_and_late_trade(conn):
     t1 = str(uuid.uuid4())
     # run 1: FX, a price, one trade, a later price; plus a garbled line, a bad price and an exact duplicate trade
     feed(conn, [price(EURUSD, 1.1, "08:00:00"), price(GBPUSD, 1.3, "08:00:00"), price(USDJPY, 150, "08:00:00"),
@@ -67,17 +67,13 @@ def test_quality_logs_and_late_data_restatement(conn):
     clean, gold = step(conn)
     assert clean[2] == 10 and clean[3] == 2 and clean[7] == 1 and clean[8] is True       # raw, bad, duplicates, balanced
 
-    row = conn.execute("select raw_rows, bad_rows, duplicates_dropped, balanced from clean.run_log").fetchone()
-    assert row == (10, 2, 1, True)
     hour11 = conn.execute("select total_eur from gold.portfolio_hourly where snap_time = %s", (f"{DAY}T11:00:00Z",)).fetchone()[0]
     assert float(hour11) == pytest.approx(100.0)                      # 100 shares, bought at 100, marked at 101
 
-    # run 2: a trade stamped 09:20 arrives after the 09:40 one was already processed -> replay and restatement
+    # run 2: a trade stamped 09:20 arrives after the 09:40 one was already processed -> the instrument is replayed and the hour recomputed
     feed(conn, [trade(str(uuid.uuid4()), 100.0, 100, "09:20:00")])
-    step(conn)
+    clean, gold = step(conn)
 
-    late = conn.execute("select kind, extract(epoch from late_by)/60 from clean.v_late").fetchall()
-    assert [(k, float(m)) for k, m in late] == [("trade", 20.0)]
-    assert conn.execute("select sum(late_rewinds) from gold.run_log").fetchone()[0] == 1
-    rs = conn.execute("select cause, total_before, total_after from gold.restatement where snap_time = %s", (f"{DAY}T11:00:00Z",)).fetchall()
-    assert [(c, float(b), float(a)) for c, b, a in rs] == [("late_trade", 100.0, 200.0)]
+    assert gold[4] == 1                                               # late_rewinds: that instrument was replayed once
+    hour11 = conn.execute("select total_eur from gold.portfolio_hourly where snap_time = %s", (f"{DAY}T11:00:00Z",)).fetchone()[0]
+    assert float(hour11) == pytest.approx(200.0)                      # the hour was recomputed with both purchases

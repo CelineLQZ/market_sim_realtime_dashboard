@@ -23,6 +23,8 @@ from psycopg_pool import ConnectionPool
 DB = os.environ.get("DATABASE_URL", "dbname=marketsim")
 DASHBOARD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard")
 
+QUALITY_WINDOW = 2000     # 数据质量：看最近多少行原始数据
+
 # ---- 白名单 ----
 # 汇率口径 -> (总盈亏, 已实现, 未实现) 在 stock_hourly / live_state / portfolio_hourly 里的列名（三张表同名）
 FX = {
@@ -125,16 +127,24 @@ def meta():
 def status():
     """as_of = 数据里最新的事件时间（模拟时间）。数据源/处理器是否正常用真实时钟判断。"""
     r = q1("select (select as_of from gold.process_state) as as_of, "
+           "       (select last_raw_id from clean.process_state) as clean_to_id, "
+           "       (select coalesce(max(raw_id), 0) from raw.events) as raw_max_id, "
+           "       (select count(*) from clean.dead_letter where raw_id > "
+           "          (select last_raw_id from clean.process_state) - %s) as recent_rejected, "
            "       (select updated_at from gold.process_state) as processed_at, "
            "       (select received_at from raw.events order by raw_id desc limit 1) as last_message_at, "
            "       (select count(*) from gold.alerts where cleared_at is null) as open_alerts, "
-           "       now() as server_time")
+           "       now() as server_time", [QUALITY_WINDOW])
     def age(t):
         return None if t is None else round((r["server_time"] - t).total_seconds(), 1)
     feed_age, proc_age = age(r["last_message_at"]), age(r["processed_at"])
     def state(a, ok, warn):
         return "unknown" if a is None else "ok" if a <= ok else "delayed" if a <= warn else "stale"
-    return {"as_of": r["as_of"], "server_time": r["server_time"], "open_alerts": r["open_alerts"],
+    window = min(QUALITY_WINDOW, r["clean_to_id"] or 0)      # 最近 N 行里被拒绝的比例：一个数字就能看出数据质量
+    quality = {"window_rows": window, "rejected": r["recent_rejected"] if window else 0,
+               "reject_rate": round(r["recent_rejected"] / window * 100, 2) if window else None,
+               "backlog_rows": r["raw_max_id"] - (r["clean_to_id"] or 0)}
+    return {"as_of": r["as_of"], "server_time": r["server_time"], "open_alerts": r["open_alerts"], "quality": quality,
             "feed": {"seconds_since_last_message": feed_age, "state": state(feed_age, 15, 60)},
             "processor": {"seconds_since_last_run": proc_age, "state": state(proc_age, 20, 120)}}
 
@@ -318,76 +328,6 @@ def alerts(status: Annotated[str, Query(pattern="^(open|all)$")] = "open", limit
              f"from gold.alerts a join gold.alert_rules r using (rule_id) {where} "
              f"order by (a.cleared_at is null) desc, a.fired_at desc limit %s", (limit,))
     return {"status": status, "items": rows}
-
-
-# =============== 9. quality：数据质量页，刷新得慢（几分钟一次）就够了 ===============
-# 时间窗口用"数据到达的真实时间"（received_at / run_at），因为坏行没有可靠的事件时间。hours 不传 = 全部。
-@app.get("/api/quality")
-def quality(hours: Annotated[Optional[float], Query(gt=0, le=24 * 365)] = None):
-    since = None if hours is None else datetime.now().astimezone() - timedelta(hours=hours)
-    w, wp = ("run_at >= %s", [since]) if since else ("true", [])
-
-    c = q1(f"select coalesce(sum(raw_rows), 0)::bigint as raw_rows, coalesce(sum(bad_rows), 0)::bigint as bad_rows, "
-           f"       coalesce(sum(kept_rows), 0)::bigint as kept_rows, coalesce(sum(conflicting_prices), 0)::bigint as conflicting, "
-           f"       coalesce(sum(duplicates_dropped), 0)::bigint as duplicates, "
-           f"       count(*) filter (where not balanced)::int as unbalanced_runs, count(*)::int as runs, "
-           f"       min(from_raw_id) as lo_raw_id, min(run_at) as first_run, max(run_at) as last_run "
-           f"from clean.run_log where {w}", wp)
-    rejected = c["bad_rows"] + c["conflicting"]
-    summary = {**c, "rejected": rejected,
-               "reject_rate": round(rejected / c["raw_rows"] * 100, 3) if c["raw_rows"] else None}
-
-    dl_w, dl_p = ("received_at >= %s", [since]) if since else ("true", [])
-    by_reason = q(f"select reason, count(*)::int as n from clean.dead_letter where {dl_w} group by 1 order by 2 desc, 1", dl_p)
-    samples = q(f"select raw_id, reason, left(payload, 140) as payload, received_at from clean.dead_letter "
-                f"where {dl_w} order by raw_id desc limit 6", dl_p)
-
-    # 趋势：窗口分成约 40 个桶
-    t0, t1 = c["first_run"], c["last_run"]
-    span = (t1 - t0).total_seconds() if t0 and t1 else 0
-    bucket = max(60, int(span / 40) + 1)
-    trend = q(f"select to_timestamp(floor(extract(epoch from run_at) / %s) * %s) as t, sum(raw_rows)::bigint as raw_rows, "
-              f"       sum(bad_rows + conflicting_prices)::bigint as rejected from clean.run_log where {w} group by 1 order by 1",
-              [bucket, bucket] + wp)
-
-    lo = c["lo_raw_id"] or 0
-    late = q("select kind, count(*)::int as n, "
-             "       round((extract(epoch from percentile_cont(0.5) within group (order by late_by)) / 60)::numeric, 2)::float8 as median_min, "
-             "       round((extract(epoch from max(late_by)) / 60)::numeric, 2)::float8 as max_min "
-             "from clean.v_late where raw_id >= %s group by 1 order by 1", [lo])
-    totals = q1("select (select count(*) from clean.trades where raw_id >= %s)::int as trades, "
-                "       (select count(*) from clean.prices where raw_id >= %s)::int as prices", [lo, lo])
-    g = q1(f"select coalesce(sum(late_rewinds), 0)::int as rewinds, coalesce(sum(trades_replayed), 0)::int as trades_replayed, "
-           f"       coalesce(sum(hours_rebuilt), 0)::int as hours_rebuilt from gold.run_log where {w}", wp)
-    r_w, r_p = ("restated_at >= %s", [since]) if since else ("true", [])
-    rs = q1(f"select count(*)::int as n, coalesce(sum(total_after - total_before), 0)::float8 as net_eur, "
-            f"       coalesce(max(abs(total_after - total_before)), 0)::float8 as max_abs_eur, "
-            f"       count(distinct snap_time)::int as hours from gold.restatement where {r_w}", r_p)
-    restated = q(f"select snap_time, cause, total_before::float8 as before, total_after::float8 as after, "
-                 f"       (total_after - total_before)::float8 as diff, restated_at "
-                 f"from gold.restatement where {r_w} order by abs(total_after - total_before) desc limit 10", r_p)
-
-    pipe = q1("select (select count(*) from raw.events)::bigint as raw_rows, "
-              "       (select max(raw_id) from raw.events) as raw_max_id, "
-              "       (select last_raw_id from clean.process_state) as clean_to_id, "
-              "       (select last_raw_id from gold.process_state) as gold_to_id, "
-              "       (select count(*) from clean.trades)::bigint as clean_trades, "
-              "       (select count(*) from clean.prices)::bigint as clean_prices, "
-              "       (select count(*) from clean.dead_letter)::bigint as dead_letter, "
-              "       (select count(*) from gold.position_state)::bigint as position_rows, "
-              "       (select count(*) from gold.stock_hourly)::bigint as hourly_rows, "
-              "       (select received_at from raw.events order by raw_id desc limit 1) as last_message_at, "
-              "       (select updated_at from clean.process_state) as clean_at, "
-              "       (select updated_at from gold.process_state) as gold_at, now() as server_time")
-    for k in ("last_message_at", "clean_at", "gold_at"):
-        pipe[k + "_age_s"] = None if pipe[k] is None else round((pipe["server_time"] - pipe[k]).total_seconds(), 1)
-    pipe["clean_backlog"] = (pipe["raw_max_id"] or 0) - (pipe["clean_to_id"] or 0)
-    pipe["gold_backlog"] = (pipe["clean_to_id"] or 0) - (pipe["gold_to_id"] or 0)
-
-    return {"hours": hours, "summary": summary, "by_reason": by_reason, "samples": samples,
-            "trend": {"bucket_seconds": bucket, "points": trend},
-            "late": {"events": late, "totals": totals, "rewinds": g, "restatements": {**rs, "top": restated}},
-            "pipeline": pipe}
 
 
 # 前端页面：dashboard/ 文件夹里的静态文件。放在最后，这样不会盖住上面的 /api/ 路径。
