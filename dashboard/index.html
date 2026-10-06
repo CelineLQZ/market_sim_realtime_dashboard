@@ -147,8 +147,8 @@ button:focus-visible, select:focus-visible, .hit:focus-visible { outline: 2px so
 .table-card h2 { font-size: 14px; font-weight: 700; }
 .tablewrap { overflow: auto; flex: 1 1 auto; border: 1px solid var(--grid); border-radius: 8px; }
 table { width: 100%; border-collapse: collapse; min-width: 820px; }
-th { padding: 0 8px; text-align: right; font-size: 12px; font-weight: 500; color: var(--ink-2); border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface); position: sticky; top: 0; }
-td { padding: 1px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; font-size: 13px; }
+th { padding: 0 6px; text-align: right; font-size: 12px; font-weight: 500; color: var(--ink-2); border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface); position: sticky; top: 0; }
+td { padding: 1px 6px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; font-size: 13px; }
 th.l, td.l { text-align: left; } td.l { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
 tr.sel td { background: var(--select); }
 .thb { font-size: 12px; font-weight: 500; color: var(--ink-2); background: none; border: 0; padding: 5px 0; cursor: pointer; }
@@ -180,7 +180,7 @@ tr.sel td { background: var(--select); }
   <!-- Top bar: title, period slicer, health -->
   <header class="top">
     <div class="brand">
-      <h1>P&amp;L Monitor</h1><span class="chip live">Live · 5 s</span>
+      <h1>P&amp;L Monitor</h1><span class="chip live" title="The cards, the instrument table, the contribution list and the alerts refresh every 5 s. The curve history refreshes every 30 s.">Live · 5 s</span>
       <span class="asof num" id="asof">Waiting for data…</span>
     </div>
     <div class="period">
@@ -214,12 +214,13 @@ tr.sel td { background: var(--select); }
       </div>
       <div class="chart-sub">
         <div class="crumbs" id="crumbs"><span>Showing:</span></div>
+        <span class="chip" id="chartChip" title="Each point is an hourly snapshot. The last point is the live value; the dashed part is not yet confirmed by an hourly snapshot.">Hourly points · dashed = live</span>
         <div class="legend" id="legend"></div>
       </div>
       <div class="plotwrap" id="plotwrap"><div class="plot" id="plot"></div></div>
     </div>
     <div class="card rank-card">
-      <div class="rh"><h2 id="rankTitle">Contribution</h2><span class="chip">Hourly</span></div>
+      <div class="rh"><h2 id="rankTitle">Contribution</h2><span class="chip live" title="Reads the live state, refreshed every 5 s">Live · 5 s</span></div>
       <div class="hint" id="rankHint"></div>
       <div class="rank" id="rank"></div>
     </div>
@@ -244,9 +245,10 @@ tr.sel td { background: var(--select); }
 <script>
 'use strict';
 /* ====================================================================================
-   P&L Monitor. Everything comes from the API (/api/...). Two refresh tiers:
-     every 5 s : status, KPIs, instrument table, alerts      (they read gold.live_state)
-     every 30 s or when something is clicked : P&L curve + contribution ranking (hourly snapshots)
+   P&L Monitor. Everything comes from the API (/api/...). Two refresh tiers, split by where the data comes from:
+     every 5 s : status, KPIs, instrument table, alerts, contribution ranking   (they read gold.live_state)
+     every 30 s or when something is clicked : the P&L curve (its history is hourly snapshots;
+       its last point is the live value, and is moved every 5 s to match the Total P&L card)
    All text from the API goes into the page with textContent, never innerHTML.
    ==================================================================================== */
 const API = '/api/';
@@ -276,6 +278,8 @@ const pad = (n) => String(n).padStart(2, '0');
 const fmtDay = (d) => MON[d.getUTCMonth()] + ' ' + pad(d.getUTCDate());
 const fmtDayY = (d) => fmtDay(d) + ', ' + d.getUTCFullYear();
 const fmtTime = (d) => fmtDayY(d) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+const fmtShort = (d) => fmtDay(d) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+const fmtQty = (v) => (v === 0 ? '—' : (v > 0 ? '+' : '−') + Math.abs(Math.round(v)).toLocaleString('en-US'));
 const dayKey = (d) => d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
 function money(x, signed) {            // €1.23M, €410k, €950 ; signed adds + / −
   if (x == null || isNaN(x)) return '—';
@@ -336,29 +340,28 @@ async function refreshLive() {
   const v = ++liveVer;
   try {
     const per = periodParams(), scope = scopeParams(), gp = grpParams();
-    const [status, kpis, stocks, alerts] = await Promise.all([
+    const [status, kpis, stocks, alerts, contrib] = await Promise.all([
       api('status'),
       api('kpis', Object.assign({ fx: S.fx, from: per.from }, scope)),
       api('stocks', Object.assign({ fx: S.fx, from: per.from }, gp)),
       api('alerts', { status: 'all', limit: 200 }),
+      isSplit() ? api('contributors', { dim: S.dim, fx: S.fx, from: per.from, to: per.to })
+                : api('contributors', Object.assign({ dim: 'stock', fx: S.fx, from: per.from, to: per.to }, gp)),
     ]);
     if (v !== liveVer) return;                         // a newer request has started: drop this answer
-    Object.assign(D, { status, kpis, stocks, alerts });
+    Object.assign(D, { status, kpis, stocks, alerts, contrib });
     renderLive(); setOnline(true);
   } catch (e) { console.error(e); if (v === liveVer) setOnline(false); }
 }
 async function refreshHourly() {
   const v = ++hourVer;
   try {
-    const per = periodParams(), scope = scopeParams(), gp = grpParams();
-    const [curve, contrib] = await Promise.all([
-      api('pnl-curve', Object.assign({ fx: S.fx, dim: isSplit() ? S.dim : 'none', from: per.from, to: per.to }, scope)),
-      isSplit() ? api('contributors', { dim: S.dim, fx: S.fx, from: per.from, to: per.to })
-                : api('contributors', Object.assign({ dim: 'stock', fx: S.fx, from: per.from, to: per.to }, gp)),
-    ]);
+    const per = periodParams(), scope = scopeParams();
+    const curve = await api('pnl-curve', Object.assign({ fx: S.fx, dim: isSplit() ? S.dim : 'none', from: per.from, to: per.to }, scope));
     if (v !== hourVer) return;
-    Object.assign(D, { curve, contrib });
+    D.curve = curve;
     renderHourly();
+    syncLiveEnd();
   } catch (e) { console.error(e); }
 }
 function refresh(hourly) { refreshLive(); if (hourly) refreshHourly(); }
@@ -406,12 +409,24 @@ function renderLive() {
   $('k4v').textContent = money(k.gross);
   $('k4d').textContent = 'net ' + money(k.net, true);
 
-  renderTable(); renderAlerts(); renderRisk();
+  renderTable(); renderAlerts(); renderRisk(); renderRank();
+  syncLiveEnd();
   renderMarkers();
+}
+// The curve is fetched every 30 s, the cards every 5 s. Keep the curve's last (live) point equal to the cards.
+function syncLiveEnd() {
+  const c = D.curve, k = D.kpis;
+  if (!c || !k || c.live_index == null || isSplit() || !c.series[0] || k.total == null) return;
+  const i = c.t.length - 1, s = c.series[0];
+  if (s.total[i] === k.total && s.realized[i] === k.realized) return;
+  s.total[i] = k.total; s.realized[i] = k.realized; s.unrealized[i] = k.unrealized;
+  if (k.as_of) c.t[i] = k.as_of;
+  const f = document.activeElement;
+  if (hoverIdx == null && !(f && f.id === 'hit')) renderChart();   // do not redraw under the reader's pointer or keyboard focus
 }
 function renderTable() {
   const items = (D.stocks.items || []).slice();
-  const cols = [['ticker', 'Ticker', 1], ['country', 'Country', 1], ['sector', 'Sector', 1], ['total', 'Total', 0], ['unrealized', 'Unrealized', 0], ['realized', 'Realized', 0], ['change', 'Period Δ', 0], ['age', 'Price', 1]];
+  const cols = [['ticker', 'Ticker', 1], ['country', 'Country', 1], ['sector', 'Sector', 1], ['position', 'Position', 0], ['mv_eur', 'Value', 0], ['total', 'Total', 0], ['unrealized', 'Unrealized', 0], ['realized', 'Realized', 0], ['change', 'Period Δ', 0], ['age', 'Price', 1]];
   const val = (r, k) => (k === 'age' ? (r.in_session ? r.price_age_min : -1) : r[k]);
   items.sort((a, b) => { const x = val(a, S.sortKey), y = val(b, S.sortKey); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * S.sortDir; });
   $('thead').replaceChildren(...cols.map(([k, label, left]) => el('th', { class: left ? 'l' : '' },
@@ -423,7 +438,8 @@ function renderTable() {
     const price = stale ? '▲ Stale · ' + Math.round(r.price_age_min) + ' min' : (r.in_session ? 'OK' : 'Closed');
     return el('tr', { class: S.stock === r.ticker ? 'sel' : '' },
       el('td', { class: 'l' }, el('button', { class: 'pick', type: 'button', text: r.ticker, title: r.name, 'aria-pressed': String(S.stock === r.ticker), onclick: () => toggleStock(r.ticker) })),
-      el('td', { class: 'l', text: r.country }), el('td', { class: 'l', text: r.sector }),
+      el('td', { class: 'l', text: r.country }), el('td', { class: 'l', text: r.sector, title: r.sector, style: 'max-width:128px;overflow:hidden;text-overflow:ellipsis' }),
+      el('td', { text: fmtQty(r.position) }), el('td', { text: r.position === 0 ? '—' : money(r.mv_eur, true) }),
       el('td', { text: money(r.total, true), style: 'font-weight:500' }), el('td', { text: money(r.unrealized, true) }),
       el('td', { text: money(r.realized, true) }), el('td', { text: money(r.change, true) }),
       el('td', { class: 'l' + (stale ? ' stale' : ''), text: price }));
@@ -523,7 +539,7 @@ function renderChart() {
 
   for (const v of sc.t) plot.append(el('div', { class: 'gl' + (Math.abs(v) < 1e-9 ? ' zero' : ''), style: 'top:' + y(v).toFixed(2) + '%' }, el('span', { class: 'num', text: compact(v) })));
   // x axis: hours for short ranges, days for long ones
-  const firstIdx = []; times.forEach((t, i) => { if (i === 0 || dayKey(t) !== dayKey(times[i - 1])) firstIdx.push(i); });
+  const firstIdx = []; times.forEach((t, i) => { if (i === 0 || (dayKey(t) !== dayKey(times[i - 1]) && t.getUTCDay() !== 6 && t.getUTCDay() !== 0)) firstIdx.push(i); });   // the Saturday 00:00 point belongs to Friday: not a new day
   const xt = [];
   if (firstIdx.length <= 2) { const step = Math.max(1, Math.ceil(n / 7)); for (let i = 0; i < n; i += step) xt.push([i, pad(times[i].getUTCHours()) + ':00']); }
   else { const step = Math.ceil(firstIdx.length / 7); for (let k = 0; k < firstIdx.length; k += step) xt.push([firstIdx[k], fmtDay(times[firstIdx[k]])]); }
@@ -531,9 +547,14 @@ function renderChart() {
 
   const svg = svgEl('svg', { viewBox: '0 0 1000 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
   series.slice().reverse().forEach((s) => {   // draw the first (most important) series last = on top
+    const hasLive = c.live_index != null && n >= 2, lim = hasLive ? n - 1 : n;   // the last segment (last hourly point -> now) is drawn separately, dashed
     let d = '', pen = false;
-    s.vals.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + (x(i) * 10).toFixed(1) + ' ' + y(v).toFixed(2) + ' '; pen = true; });
+    s.vals.forEach((v, i) => { if (i >= lim) return; if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + (x(i) * 10).toFixed(1) + ' ' + y(v).toFixed(2) + ' '; pen = true; });
     svg.append(svgEl('path', { d, style: 'stroke:' + s.color + ';stroke-width:' + s.w + ';stroke-dasharray:' + (s.dash === 'none' ? 'none' : s.dash) }));
+    if (hasLive && s.vals[n - 2] != null && s.vals[n - 1] != null) {
+      svg.append(svgEl('path', { d: 'M' + (x(n - 2) * 10).toFixed(1) + ' ' + y(s.vals[n - 2]).toFixed(2) + ' L' + (x(n - 1) * 10).toFixed(1) + ' ' + y(s.vals[n - 1]).toFixed(2),
+        style: 'stroke:' + s.color + ';stroke-width:' + s.w + ';stroke-dasharray:3 4' }));
+    }
   });
   plot.append(svg);
 
@@ -581,16 +602,17 @@ function renderMarkers() {
   if (!c || !c._times || isSplit() || S.grp || S.stock || !D.alerts) return;
   const t0 = c._times[0], t1 = c._times[c._times.length - 1], n = c._times.length;
   const fired = (D.alerts.items || []).filter((a) => a.rule_id === 'drawdown' && a.scope === 'portfolio' && new Date(a.fired_at) >= t0 && new Date(a.fired_at) <= t1);
-  fired.slice(0, 3).forEach((a) => {
+  fired.slice(0, 3).forEach((a, k) => {
     const ft = new Date(a.fired_at); let bi = 0;
     c._times.forEach((t, i) => { if (Math.abs(t - ft) < Math.abs(c._times[bi] - ft)) bi = i; });
     const left = c._x(bi).toFixed(2) + '%';
     plot.insertBefore(el('div', { class: 'amark', style: 'left:' + left }), $('cross'));
-    plot.insertBefore(el('div', { class: 'atag', style: 'left:' + left, text: fmtTime(ft) + ' · drawdown alert' }), $('cross'));
+    plot.insertBefore(el('div', { class: 'atag', style: 'left:' + left + ';top:' + (4 + k * 26) + 'px', text: fmtShort(ft) + ' · drawdown alert' }), $('cross'));
   });
 }
 
 function renderRank() {
+  if (!D.contrib) return;
   const items = D.contrib.items || [], host = $('rank'), split = isSplit();
   const mxOf = (list) => Math.max(0.01, ...list.map((r) => Math.abs(r.change)));
   const row = (r, mx, sw, onPick, selected) => el('div', { class: 'rrow' + (selected ? ' sel' : '') },
