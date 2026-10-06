@@ -39,6 +39,9 @@ html, body { margin: 0; height: 100%; }
 body { background: var(--page); color: var(--ink); font: 14px/1.35 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .num { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
 h1, h2 { margin: 0; }
+.nav { display: inline-flex; gap: 2px; background: var(--grid); border-radius: 8px; padding: 2px; }
+.nav a { padding: 3px 10px; border-radius: 6px; color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: 13px; }
+.nav a[aria-current="page"] { background: var(--active-bg); color: var(--active-ink); }
 
 .app { height: 100vh; min-height: 760px; min-width: 1100px; padding: 12px 24px; display: flex; flex-direction: column; gap: 10px; transition: opacity .2s; }
 .app.loading { opacity: .6; }
@@ -163,6 +166,7 @@ tr.sel td { background: var(--select); }
 .al { font-size: 13px; line-height: 19px; }
 .al .sev { font-weight: 700; margin-right: 4px; }
 .al .sev.high { color: var(--crit); } .al .sev.medium { color: #8a5d00; }
+.al .sev.low { color: var(--ink-3); }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .al .sev.medium { color: var(--warn); } }
 .al small { display: block; font-size: 12px; color: var(--ink-2); }
 .risk { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 0 0 auto; }
@@ -180,7 +184,7 @@ tr.sel td { background: var(--select); }
   <!-- Top bar: title, period slicer, health -->
   <header class="top">
     <div class="brand">
-      <h1>P&amp;L Monitor</h1><span class="chip live" title="The cards, the instrument table, the contribution list and the alerts refresh every 5 s. The curve history refreshes every 30 s.">Live · 5 s</span>
+      <h1>P&amp;L Monitor</h1><nav class="nav" aria-label="Pages"><a href="index.html" aria-current="page">Live P&amp;L</a><a href="quality.html">Quality</a></nav><span class="chip live" title="The cards, the instrument table, the contribution list and the alerts refresh every 5 s. The curve history refreshes every 30 s.">Live · 5 s</span>
       <span class="asof num" id="asof">Waiting for data…</span>
     </div>
     <div class="period">
@@ -446,11 +450,12 @@ function renderTable() {
   }));
 }
 function toggleStock(t) { setState({ stock: S.stock === t ? null : t }); }
+const SEV_RANK = { high: 3, medium: 2, low: 1 };
 function renderAlerts() {
-  const all = D.alerts.items || [], open = all.filter((a) => !a.cleared_at);
+  const all = D.alerts.items || [], open = all.filter((a) => !a.cleared_at).sort((x, y) => SEV_RANK[y.severity] - SEV_RANK[x.severity]);
   const card = $('alertsCard');
   card.classList.toggle('high', open.some((a) => a.severity === 'high'));
-  const fmtV = (a, v) => (a.rule_id === 'stale_price' ? Math.round(v) + ' min' : money(v));
+  const fmtV = (a, v) => (a.unit === 'min' ? Math.round(v) + ' min' : a.unit === '%gross' ? (v < 0 ? '−' : '') + Math.abs(v).toFixed(2) + '% of gross' : a.unit === '%' ? Number(v).toFixed(2) + '%' : money(v));
   const body = $('alertsBody');
   if (!open.length) {
     body.replaceChildren(el('div', { class: 'al' }, el('span', { class: 'sev', style: 'color:var(--ok)', text: '● ' }), 'No open alerts — all rules within limits.'),
@@ -458,7 +463,7 @@ function renderAlerts() {
     return;
   }
   const rows = open.slice(0, 4).map((a) => el('div', { class: 'al' },
-    el('span', { class: 'sev ' + a.severity, text: (a.severity === 'high' ? '▲ High' : '● Medium') }),
+    el('span', { class: 'sev ' + a.severity, text: (a.severity === 'high' ? '▲ High' : a.severity === 'medium' ? '● Medium' : '○ Low') }),
     a.description + (a.scope !== 'portfolio' ? ' · ' + a.scope : '') + ': ' + fmtV(a, a.last_value) + ' (limit ' + fmtV(a, a.threshold) + ')',
     el('small', { class: 'num', text: 'Fired ' + fmtTime(new Date(a.fired_at)) + ' UTC' })));
   if (open.length > 4) rows.push(el('div', { class: 'hint', text: '+' + (open.length - 4) + ' more open' }));

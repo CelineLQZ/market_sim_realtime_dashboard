@@ -7,7 +7,7 @@
 --         固定参考汇率会被清掉，重算时重新取"数据里第一个有完整汇率的小时"。
 
 truncate gold.fx_reference, gold.fx_rate_hourly, gold.position_state, gold.stock_hourly,
-         gold.portfolio_hourly, gold.live_state, gold.alerts;
+         gold.portfolio_hourly, gold.live_state, gold.alerts, gold.run_log, gold.restatement;
 update gold.process_state set last_raw_id = 0, as_of = null, updated_at = now();
 
 select * from gold.run();

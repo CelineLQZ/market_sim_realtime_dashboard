@@ -49,6 +49,21 @@ create table if not exists clean.process_state (
 );
 insert into clean.process_state (id) values (1) on conflict do nothing;
 
+-- 运行日志：每次 clean.run() 处理了新行就记一行。质量看板用它来展示"进来多少、拒绝多少、重复多少"。
+create table if not exists clean.run_log (
+    run_id             bigserial primary key,
+    run_at             timestamptz not null default now(),   -- 真实时间
+    from_raw_id        bigint not null,
+    to_raw_id          bigint not null,
+    raw_rows           bigint not null,
+    bad_rows           bigint not null,                      -- 格式或取值有问题的行
+    kept_rows          bigint not null,
+    conflicting_prices bigint not null,
+    duplicates_dropped bigint not null,
+    balanced           boolean not null                      -- 对账是否平了
+);
+create index if not exists clean_run_log_at on clean.run_log (run_at);
+
 -- ============ 2. 解析和检查（用一个视图把逻辑集中在一处） ============
 -- 视图只是一段"保存下来的查询"，本身不存数据。下面用的时候会加上 raw_id 范围，所以只会解析新行。
 create or replace view clean.v_parsed as
@@ -211,5 +226,10 @@ begin
                                            + (select count(*) from dups)
     into from_raw_id, to_raw_id, raw_rows, bad_rows, good_rows, kept_rows,
          conflicting_prices, duplicates_dropped, balanced;
+
+    if raw_rows > 0 then
+        insert into clean.run_log (from_raw_id, to_raw_id, raw_rows, bad_rows, kept_rows, conflicting_prices, duplicates_dropped, balanced)
+        values (from_raw_id, to_raw_id, raw_rows, bad_rows, kept_rows, conflicting_prices, duplicates_dropped, balanced);
+    end if;
 end;
 $$;

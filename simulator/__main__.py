@@ -5,7 +5,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 
-from .market import Market, SimConfig, load_instruments
+from .market import STRATEGIES, Market, SimConfig, load_instruments
 from .server import serve
 
 
@@ -31,7 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--late-prob", type=float, default=0.03, help="share of out-of-order timestamps")
     p.add_argument("--late-max-seconds", type=float, default=300.0)
     p.add_argument("--duplicate-prob", type=float, default=0.0, help="share of duplicated messages")
-    p.add_argument("--bad-prob", type=float, default=0.0, help="share of corrupted messages")
+    p.add_argument("--bad-prob", type=float, default=0.01, help="share of corrupted messages (default 1%%)")
+    p.add_argument("--strategy", choices=STRATEGIES, default="market_maker",
+                   help="how our own trades are made: market_maker (earn the spread) or random (old behaviour)")
+    p.add_argument("--position-limit-eur", type=float, default=5_000_000,
+                   help="market maker: largest position per stock in EUR market value")
+    p.add_argument("--informed-prob", type=float, default=0.10,
+                   help="market maker: share of client orders that are informed (adverse selection)")
+    p.add_argument("--informed-bps", type=float, default=8.0,
+                   help="market maker: how far the price moves after an informed order (basis points)")
     return p
 
 
@@ -41,7 +49,9 @@ def main() -> None:
                     sim_seconds_per_message=args.sim_seconds_per_message,
                     trade_ratio=args.trade_ratio, late_prob=args.late_prob,
                     late_max_seconds=args.late_max_seconds,
-                    duplicate_prob=args.duplicate_prob, bad_prob=args.bad_prob)
+                    duplicate_prob=args.duplicate_prob, bad_prob=args.bad_prob,
+                    strategy=args.strategy, position_limit_eur=args.position_limit_eur,
+                    informed_prob=args.informed_prob, informed_bps=args.informed_bps)
     if args.mode == "stdout":
         market = Market(load_instruments(), cfg)
         sent = 0

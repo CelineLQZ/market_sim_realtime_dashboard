@@ -46,6 +46,7 @@ schema: db ## 建表、建函数、载入参考数据（可以反复运行，不
 	@$(PSQL) -f sql/02_clean.sql
 	@$(PSQL) -f sql/04_exchange_sessions.sql
 	@$(PSQL) -f sql/05_gold.sql
+	@$(PSQL) -f sql/07_quality.sql
 	@echo "  表和函数已就绪"
 
 # ---------------- 一条命令启动 / 停止 ----------------

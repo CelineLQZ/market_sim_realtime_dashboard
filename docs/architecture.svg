@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 900" width="1800" height="900" font-family="-apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3A4A63"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1F4E8C"/>
+    </marker>
+    <style>
+      .title { font-size: 30px; font-weight: 700; fill: #172033; }
+      .sub   { font-size: 16px; fill: #5A6577; }
+      .tag   { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; fill: #5A6577; }
+      .h     { font-size: 17px; font-weight: 700; fill: #172033; }
+      .b     { font-size: 13.5px; fill: #2B3547; }
+      .bb    { font-size: 13.5px; font-weight: 700; fill: #172033; }
+      .m     { font-size: 13px; fill: #2B3547; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .mm    { font-size: 12.5px; fill: #5A6577; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .mu    { font-size: 13px; fill: #5A6577; }
+      .note  { font-size: 12.5px; font-style: italic; fill: #5A6577; }
+      .lbl   { font-size: 11.5px; fill: #5A6577; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="900" fill="#FAFAF8"/>
+
+  <text x="60" y="70" class="title">A real-time P&amp;L pipeline that stays correct when the data is messy</text>
+  <text x="60" y="104" class="sub">market-sim · system architecture · raw → clean → gold on PostgreSQL, served by FastAPI</text>
+
+  <!-- column tags -->
+  <text x="60" y="186" class="tag">SOURCE</text>
+  <text x="335" y="186" class="tag">INGEST</text>
+  <text x="1535" y="186" class="tag">SERVE</text>
+
+  <!-- A: simulator -->
+  <rect x="60" y="200" width="230" height="380" rx="10" fill="#E8EDF5" stroke="#C3CFE0"/>
+  <text x="80" y="234" class="h">Market simulator</text>
+  <text x="80" y="256" class="mm">simulator/</text>
+  <text x="80" y="292" class="b">TCP :1337 · NDJSON</text>
+  <text x="80" y="314" class="b">33 instruments</text>
+  <text x="80" y="336" class="b">6 exchanges + 3 FX pairs</text>
+  <text x="80" y="358" class="b">Real trading sessions,</text>
+  <text x="80" y="380" class="b">follow-the-sun volume</text>
+  <text x="80" y="416" class="bb">Fault injection</text>
+  <text x="80" y="438" class="b">· late events (3%)</text>
+  <text x="80" y="460" class="b">· duplicates (opt-in)</text>
+  <text x="80" y="482" class="b">· corrupted rows (1%)</text>
+  <text x="80" y="516" class="b">Desk = market maker</text>
+  <text x="80" y="550" class="note">Same seed → same stream</text>
+
+  <!-- B: ingest -->
+  <rect x="335" y="200" width="230" height="380" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="355" y="234" class="h">Loader</text>
+  <text x="355" y="256" class="mm">ingest/ingest.py</text>
+  <text x="355" y="292" class="b">Stores every line verbatim</text>
+  <text x="355" y="314" class="b">No parsing · no dedup</text>
+  <text x="355" y="336" class="b">Batch: 100 rows or 1 s</text>
+  <text x="355" y="372" class="bb">Safe by design</text>
+  <text x="355" y="394" class="b">SIGTERM → flush, then exit</text>
+  <text x="355" y="416" class="b">Each run logged in</text>
+  <text x="355" y="436" class="m">raw.ingest_runs</text>
+  <text x="355" y="460" class="b">Count check at exit:</text>
+  <text x="355" y="482" class="b">received = stored</text>
+  <text x="355" y="550" class="note">Land first, judge later</text>
+
+  <!-- C: PostgreSQL container -->
+  <rect x="610" y="150" width="880" height="450" rx="14" fill="#F2F4F7" stroke="#D3D9E2"/>
+  <text x="630" y="180" class="bb">PostgreSQL<tspan class="mu" font-weight="400">  ·  one database, three schemas (medallion layers)</tspan></text>
+
+  <!-- raw -->
+  <rect x="630" y="200" width="200" height="380" rx="10" fill="#E8EDF5" stroke="#C3CFE0"/>
+  <text x="650" y="228" class="tag" fill="#3B5478" style="fill:#3B5478">RAW</text>
+  <text x="650" y="252" class="h">Landing zone</text>
+  <text x="650" y="290" class="m">raw.events</text>
+  <text x="650" y="311" class="m">raw.ingest_runs</text>
+  <text x="650" y="350" class="b">Append-only</text>
+  <text x="650" y="372" class="b">raw_id = arrival order</text>
+  <text x="650" y="394" class="b">payload kept as text,</text>
+  <text x="650" y="416" class="b">even garbage lines</text>
+  <text x="650" y="532" class="note">Every layer above can</text>
+  <text x="650" y="552" class="note">be rebuilt from here</text>
+
+  <!-- clean -->
+  <rect x="920" y="200" width="240" height="380" rx="10" fill="#EAF1FB" stroke="#B9CDEA"/>
+  <text x="940" y="228" class="tag" style="fill:#1F4E8C">CLEAN</text>
+  <text x="940" y="252" class="h">Validated facts</text>
+  <text x="940" y="290" class="m">clean.trades</text>
+  <text x="940" y="311" class="m">clean.prices</text>
+  <text x="940" y="332" class="m" style="fill:#A84B0C">clean.dead_letter</text>
+  <text x="940" y="353" class="m">clean.instruments</text>
+  <text x="940" y="374" class="m">clean.exchange_sessions</text>
+  <text x="940" y="395" class="m">clean.run_log</text>
+  <text x="940" y="416" class="m">clean.process_state</text>
+  <text x="940" y="454" class="b">Typed · deduplicated</text>
+  <text x="940" y="476" class="b">Bad rows quarantined,</text>
+  <text x="940" y="498" class="b">never dropped</text>
+  <text x="940" y="552" class="note">Reconciled on every run</text>
+
+  <!-- gold -->
+  <rect x="1250" y="200" width="220" height="380" rx="10" fill="#FBF5E4" stroke="#E6D49E"/>
+  <text x="1270" y="228" class="tag" style="fill:#7A5A00">GOLD</text>
+  <text x="1270" y="252" class="h">Business-ready P&amp;L</text>
+  <text x="1270" y="290" class="m">gold.position_state</text>
+  <text x="1270" y="311" class="m">gold.stock_hourly</text>
+  <text x="1270" y="332" class="m">gold.portfolio_hourly</text>
+  <text x="1270" y="353" class="m">gold.fx_rate_hourly</text>
+  <text x="1270" y="374" class="m">gold.live_state</text>
+  <text x="1270" y="395" class="m">gold.alerts</text>
+  <text x="1270" y="416" class="m">gold.restatement</text>
+  <text x="1270" y="437" class="m">gold.run_log</text>
+  <text x="1270" y="476" class="b">Hourly snapshots, live</text>
+  <text x="1270" y="498" class="b">state, alerts, and an</text>
+  <text x="1270" y="520" class="b">audit of restated hours</text>
+  <text x="1270" y="552" class="note">Re-computable any time</text>
+
+  <!-- data arrows across the main row -->
+  <line x1="290" y1="400" x2="333" y2="400" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="312" y="390" class="lbl" text-anchor="middle">TCP</text>
+  <line x1="565" y1="400" x2="628" y2="400" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="590" y="390" class="lbl" text-anchor="middle">INSERT</text>
+
+  <line x1="830" y1="400" x2="918" y2="400" stroke="#1F4E8C" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <rect x="828" y="356" width="94" height="24" rx="12" fill="#FFFFFF" stroke="#1F4E8C"/>
+  <text x="875" y="372" class="mm" text-anchor="middle" style="fill:#1F4E8C">clean.run()</text>
+
+  <line x1="1160" y1="400" x2="1248" y2="400" stroke="#1F4E8C" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <rect x="1158" y="356" width="94" height="24" rx="12" fill="#FFFFFF" stroke="#1F4E8C"/>
+  <text x="1205" y="372" class="mm" text-anchor="middle" style="fill:#1F4E8C">gold.run()</text>
+
+  <line x1="1470" y1="285" x2="1533" y2="285" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="1502" y="275" class="lbl" text-anchor="middle">SELECT</text>
+
+  <!-- D: API + dashboards -->
+  <rect x="1535" y="200" width="205" height="170" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="1555" y="234" class="h">FastAPI</text>
+  <text x="1555" y="256" class="mm">api/main.py</text>
+  <text x="1555" y="292" class="b">Reads gold only</text>
+  <text x="1555" y="314" class="b">No P&amp;L math in the API</text>
+  <text x="1555" y="336" class="b">Whitelisted SQL params</text>
+  <text x="1555" y="358" class="b">/docs auto-generated</text>
+
+  <line x1="1637" y1="370" x2="1637" y2="408" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="1535" y="410" width="205" height="170" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="1555" y="444" class="h">Dashboards</text>
+  <text x="1555" y="466" class="mm">dashboard/</text>
+  <text x="1555" y="502" class="b">Live P&amp;L · every 5 s</text>
+  <text x="1555" y="524" class="b">Data Quality page</text>
+  <text x="1555" y="546" class="b">Static replay mode</text>
+  <text x="1555" y="566" class="mu">(no backend needed)</text>
+
+  <!-- orchestrator -->
+  <rect x="610" y="640" width="880" height="140" rx="10" fill="#FFFFFF" stroke="#1F4E8C" stroke-dasharray="6 4"/>
+  <text x="630" y="672" class="h">processor.py<tspan class="mu" font-weight="400">  —  long-running loop that only schedules; all logic lives in SQL</tspan></text>
+  <text x="630" y="706" class="m">every 5 s:  clean.run() → commit → gold.run() → commit</text>
+  <text x="630" y="734" class="b">New simulated day → <tspan class="m">gold.nightly_fix()</tspan> re-values the finished day with late quotes</text>
+  <text x="630" y="758" class="b">Error → back off (up to 30 s) and reconnect · SIGTERM → finish the cycle, then stop</text>
+  <line x1="875" y1="640" x2="875" y2="408" stroke="#1F4E8C" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <line x1="1205" y1="640" x2="1205" y2="408" stroke="#1F4E8C" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <circle cx="875" cy="404" r="3.5" fill="#1F4E8C"/>
+  <circle cx="1205" cy="404" r="3.5" fill="#1F4E8C"/>
+
+  <!-- run & verify -->
+  <rect x="60" y="640" width="505" height="140" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="80" y="672" class="h">Run &amp; verify</text>
+  <text x="80" y="702" class="b"><tspan class="m">make up</tspan>  starts simulator, ingest, processor and API</text>
+  <text x="80" y="726" class="m">make status · logs · check · test · down</text>
+  <text x="80" y="752" class="b">pytest: simulator model · P&amp;L vs independent recomputation</text>
+  <text x="80" y="772" class="b">· SQL pipeline on a throw-away database</text>
+
+  <!-- why postgres -->
+  <rect x="1535" y="640" width="205" height="140" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="1555" y="672" class="h">Why PostgreSQL?</text>
+  <text x="1555" y="702" class="b">Transactions make</text>
+  <text x="1555" y="724" class="b">correctness easy to prove.</text>
+  <text x="1555" y="748" class="b">Same design maps to</text>
+  <text x="1555" y="770" class="b">Kafka + Spark + Delta.</text>
+
+  <!-- legend -->
+  <line x1="60" y1="826" x2="100" y2="826" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="110" y="830" class="mu">data</text>
+  <line x1="170" y1="826" x2="210" y2="826" stroke="#1F4E8C" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="220" y="830" class="mu">scheduling (control)</text>
+  <rect x="390" y="817" width="18" height="18" rx="4" fill="#E8EDF5" stroke="#C3CFE0"/>
+  <text x="416" y="830" class="mu">raw · immutable</text>
+  <rect x="540" y="817" width="18" height="18" rx="4" fill="#EAF1FB" stroke="#B9CDEA"/>
+  <text x="566" y="830" class="mu">clean · validated</text>
+  <rect x="700" y="817" width="18" height="18" rx="4" fill="#FBF5E4" stroke="#E6D49E"/>
+  <text x="726" y="830" class="mu">gold · business-ready</text>
+
+  <text x="60" y="870" class="mu">Each layer keeps its own progress pointer (<tspan class="mm">process_state.last_raw_id</tspan>) and run log, so every cycle is incremental, idempotent and reconciled.</text>
+</svg>

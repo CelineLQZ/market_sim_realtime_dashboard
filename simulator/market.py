@@ -34,7 +34,8 @@ EQUITY_YEAR_SECONDS = 252 * 6.5 * 3600   # trading seconds per year, for equitie
 FX_YEAR_SECONDS = 252 * 24 * 3600        # weekday seconds per year, for FX and the market factor
 MAX_STEP_SECONDS = 3600                  # cap on elapsed time per price step (overnight gaps)
 MARKET_VOL = 0.16                        # annual volatility of the common market factor (moves around the clock)
-SPREAD_BPS = 5.0                         # equity trades execute around mid +/- half spread
+SPREAD_BPS = 5.0                         # equity trades execute around mid +/- half spread (a 5 bp wide spread)
+STRATEGIES = ("market_maker", "random")
 
 BAD_KINDS = ("null_price", "negative_price", "zero_volume",
              "unknown_instrument", "bad_side", "garbage_line")
@@ -70,7 +71,13 @@ class SimConfig:
     late_prob: float = 0.03                 # chance an event is stamped earlier than "now"
     late_max_seconds: float = 300.0         # how far back a late event can be stamped
     duplicate_prob: float = 0.0             # chance a message is sent twice (off by default)
-    bad_prob: float = 0.0                   # chance a message is corrupted (off by default)
+    bad_prob: float = 0.01                  # chance a message is corrupted (about 1% of all rows)
+    # --- how the firm's own trades are generated ---
+    strategy: str = "market_maker"          # "market_maker": clients trade against us and we earn the spread
+                                            # "random": we hit the quotes at random and pay the spread (old behaviour)
+    position_limit_eur: float = 5_000_000   # market maker: largest position per stock, in EUR market value
+    informed_prob: float = 0.10             # market maker: share of client orders that know where the price goes next
+    informed_bps: float = 8.0               # ... and the price then moves this much (basis points) in their direction
 
 
 def load_instruments(data_dir: Path = DATA_DIR) -> list[Instrument]:
@@ -101,6 +108,12 @@ class Market:
         self.last_touch = {i.instrument_id: cfg.start for i in self.instruments}
         self.factor_at_touch = {i.instrument_id: 0.0 for i in self.instruments}
         self.last_sign = {i.instrument_id: 0 for i in self.instruments}
+        self.inventory = {i.instrument_id: 0 for i in self.instruments}   # our position in shares (market maker)
+        if cfg.strategy not in STRATEGIES:
+            raise ValueError(f"unknown strategy {cfg.strategy!r}, choose one of {STRATEGIES}")
+        by_name = {i.short_name: i.instrument_id for i in self.instruments}
+        self._fx_ids = {k: by_name.get(k) for k in ("EUR/USD", "GBP/USD", "USD/JPY")}
+        self._last_fill: tuple[str, int] | None = None   # (instrument, signed shares) of the trade just made
         self.factor = 0.0                    # cumulative log-return of the common market factor
         self.last_factor_time = cfg.start
         self._last_quote: dict[str, tuple[float, str]] = {}   # last (price, date) published per instrument
@@ -197,8 +210,62 @@ class Market:
         return {"type": "price", "data": {
             "instrument_id": inst.instrument_id, "price": price, "date": date}}
 
+    def _to_eur(self, currency: str) -> float:
+        """EUR value of one unit of `currency`, from the simulated FX quotes (same convention as the gold layer)."""
+        ids = self._fx_ids
+        if currency == "EUR" or not all(ids.values()):
+            return 1.0
+        eurusd = self.price[ids["EUR/USD"]]
+        if currency == "USD":
+            return 1 / eurusd
+        if currency == "GBP":
+            return self.price[ids["GBP/USD"]] / eurusd
+        if currency == "JPY":
+            return 1 / self.price[ids["USD/JPY"]] / eurusd
+        return 1.0
+
+    def _draw_volume(self) -> int:
+        return int(min(100_000, max(100, self.rng.lognormvariate(math.log(8000), 1.0))))
+
+    def _market_maker_trade(self, inst: Instrument, mid: float) -> dict:
+        """A client order arrives and we take the other side of it.
+
+        * A client BUY lifts our offer (we SELL slightly above mid); a client SELL hits our bid (we BUY below mid).
+          So every fill earns half the spread.
+        * Soft inventory control: the fuller our position, the more our quotes lean towards clients trading the
+          other way, so the position drifts back to zero.
+        * Hard limit: a fill never takes the position beyond the limit (smaller size, or the other side).
+        * Some clients are informed: right after they trade, the price moves in their direction. That is the
+          market maker's real risk (adverse selection).
+        """
+        iid = inst.instrument_id
+        inv = self.inventory[iid]
+        limit = max(self.cfg.position_limit_eur / max(mid * self._to_eur(inst.currency), 1e-9), 200.0)   # shares
+        lean = 0.3 * max(-1.0, min(1.0, inv / limit))            # long -> more client buying -> we sell
+        p_client_buy = max(0.05, min(0.95, 0.5 + 0.1 * self.last_sign[iid] + lean))
+        client_buy = self.rng.random() < p_client_buy
+        volume = self._draw_volume()
+        our_buy = not client_buy
+        room = (limit - inv) if our_buy else (limit + inv)       # shares we may still add on this side
+        if room < 100:                                           # at the limit: only the reducing side is available
+            our_buy, client_buy = client_buy, our_buy
+            room = (limit - inv) if our_buy else (limit + inv)
+        volume = max(100, min(volume, int(room)))
+        sign = 1 if our_buy else -1
+        px = mid * (1 - sign * SPREAD_BPS / 2e4 + self.rng.gauss(0, 0.0001))
+        self.inventory[iid] = inv + sign * volume
+        self._last_fill = (iid, sign * volume)
+        if self.rng.random() < self.cfg.informed_prob:           # informed client: the price follows its direction
+            self.price[iid] *= math.exp((1 if client_buy else -1) * self.cfg.informed_bps / 1e4)
+        return {"type": "trade", "data": {
+            "trade_id": self._uuid(), "instrument_id": iid,
+            "price": round(px, 4), "volume": volume, "side": "BUY" if our_buy else "SELL",
+            "currency": inst.currency, "date": _fmt(self._event_time(inst))}}
+
     def _trade_msg(self, inst: Instrument) -> dict:
         mid = self._touch(inst)
+        if self.cfg.strategy == "market_maker":
+            return self._market_maker_trade(inst, mid)
         p_buy = 0.5 + 0.1 * self.last_sign[inst.instrument_id]   # slight momentum
         side = "BUY" if self.rng.random() < p_buy else "SELL"
         sign = 1 if side == "BUY" else -1
@@ -242,8 +309,11 @@ class Market:
             msg = self._trade_msg(self._weighted(equities))
         else:
             msg = self._price_msg(self._weighted(open_now))   # FX is always open on weekdays
+        fill, self._last_fill = self._last_fill, None
         if self.rng.random() < self.cfg.bad_prob:
             line = self._corrupt(msg)
+            if fill is not None:          # a corrupted trade is not a valid trade: it never reaches the books
+                self.inventory[fill[0]] -= fill[1]
         else:
             line = json.dumps(msg, separators=(",", ":"))
         lines = [line]

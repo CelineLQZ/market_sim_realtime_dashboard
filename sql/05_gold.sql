@@ -117,14 +117,31 @@ alter table gold.live_state add column if not exists total_eur_cfx      numeric 
 create table if not exists gold.alert_rules (
     rule_id         text primary key,
     description     text    not null,
-    threshold       numeric not null,          -- 触发阈值（欧元，或分钟）
+    threshold       numeric not null,          -- 触发阈值（单位见 unit）
     clear_threshold numeric not null,          -- 解除阈值：回到这里才算解除，避免在阈值附近反复触发
-    severity        text    not null
+    severity        text    not null,
+    unit            text                       -- '%gross' = 占总敞口的百分比；'%' = 百分比；'min' = 分钟
 );
-insert into gold.alert_rules (rule_id, description, threshold, clear_threshold, severity) values
-    ('drawdown',        'Total P&L fell from its peak',                 3800000, 3000000, 'high'),
-    ('unrealized_drop', 'Unrealized P&L fell since the last snapshot',  1800000, 1400000, 'medium'),
-    ('stale_price',     'Price stale during trading session (minutes)', 30,      30,      'medium')
+alter table gold.alert_rules add column if not exists unit text;
+
+-- 旧版本的两条规则是欧元绝对值：发现 unit 为空就迁移成相对值，并清掉按旧口径产生的预警
+do $$ begin
+    if exists (select 1 from gold.alert_rules where rule_id in ('drawdown', 'unrealized_drop') and unit is null) then
+        delete from gold.alerts where rule_id in ('drawdown', 'unrealized_drop');
+        delete from gold.alert_rules where rule_id in ('drawdown', 'unrealized_drop');
+    end if;
+    update gold.alert_rules set unit = 'min' where rule_id = 'stale_price' and unit is null;
+end $$;
+
+-- 阈值按"模拟器默认参数（做市策略、坏行 1%）下的正常波动"校准；相对阈值不会因为组合变大变小而失效。
+insert into gold.alert_rules (rule_id, description, threshold, clear_threshold, severity, unit) values
+    ('drawdown',        'Total P&L fell from its peak (% of gross exposure)',            0.6,  0.4,  'high',   '%gross'),
+    ('unrealized_drop', 'Unrealized P&L fell since last snapshot (% of gross exposure)', 0.2,  0.12, 'medium', '%gross'),
+    ('stock_loss',      'One stock total P&L below -x% of gross exposure',               0.3,  0.2,  'medium', '%gross'),
+    ('concentration',   'One stock market value above x% of gross exposure',             12,   10,   'high', '%gross'),
+    ('price_jump',      'Latest quote moved more than x% from the previous one',         1.5,  1.0,  'low', '%'),
+    ('bad_rows_spike',  'Rejected share of the last 1000 raw rows above x%',             3,    2,    'high',   '%'),
+    ('stale_price',     'Price stale during trading session (minutes)',                  90,   60,   'low', 'min')
 on conflict (rule_id) do nothing;     -- 阈值被你改过之后，重跑脚本不会改回去
 
 create table if not exists gold.alerts (
@@ -139,6 +156,32 @@ create table if not exists gold.alerts (
     severity    text        not null
 );
 create index if not exists alerts_open on gold.alerts (rule_id, scope) where cleared_at is null;
+
+-- 运行日志：每次处理了新数据就记一行（没有新数据的空转不记）。质量看板用它来展示"处理了多少、迟到回放了多少次"。
+create table if not exists gold.run_log (
+    run_id             bigserial primary key,
+    run_at             timestamptz not null default now(),   -- 真实时间
+    from_raw_id        bigint      not null,
+    to_raw_id          bigint      not null,
+    instruments_touched int        not null,
+    trades_replayed    int         not null,
+    late_rewinds       int         not null,                 -- 事件时间比已处理的更早的成交：该标的从那个时间起被重放
+    hours_rebuilt      int         not null,
+    as_of              timestamptz,                          -- 模拟时间
+    open_alerts        int         not null
+);
+create index if not exists gold_run_log_at on gold.run_log (run_at);
+
+-- 修正记录：某个小时的总盈亏被重算后，数字变了多少（迟到成交回放、收盘后批处理）
+create table if not exists gold.restatement (
+    restated_id bigserial primary key,
+    restated_at timestamptz not null default now(),          -- 真实时间
+    snap_time   timestamptz not null,                        -- 被修正的是哪个小时（模拟时间）
+    cause       text        not null,                        -- 'late_trade' 或 'nightly_fix'
+    total_before numeric    not null,
+    total_after  numeric    not null
+);
+create index if not exists gold_restatement_at on gold.restatement (restated_at);
 
 create table if not exists gold.process_state (
     id          int primary key default 1 check (id = 1),
@@ -216,13 +259,19 @@ end $$;
 -- 快照时刻 h 的状态 = 事件时间 <= h 的最新持仓、最新报价、最新汇率（"as-of"）。
 -- 只生成周一到周五的小时。因为按事件时间取"最新"，迟到的旧报价也会在这里被正确放回去，
 -- 所以重算（nightly_fix）可以修正历史。
-create or replace function gold.rebuild_hourly(p_from timestamptz, p_to timestamptz) returns int
+drop function if exists gold.rebuild_hourly(timestamptz, timestamptz);
+create or replace function gold.rebuild_hourly(p_from timestamptz, p_to timestamptz, p_cause text default null) returns int
 language plpgsql as $$
 declare
     n int;
     v_eurusd uuid; v_gbpusd uuid; v_usdjpy uuid;
 begin
     p_from := date_trunc('hour', p_from);
+    -- 指定了原因（日常迟到回放、收盘批处理）就先把旧的小时总盈亏留一份，重算后对比，数字变了的记进 gold.restatement
+    drop table if exists _old_hours;
+    if p_cause is not null then
+        create temp table _old_hours as select snap_time, total_eur from gold.portfolio_hourly where snap_time >= p_from;
+    end if;
     delete from gold.stock_hourly     where snap_time >= p_from;
     delete from gold.portfolio_hourly where snap_time >= p_from;
     delete from gold.fx_rate_hourly   where snap_time >= p_from;
@@ -297,6 +346,13 @@ begin
     from (select snap_time, greatest(0, max(total_eur) over (order by snap_time)) as pk from gold.portfolio_hourly) w
     where w.snap_time = p.snap_time and p.snap_time >= p_from;
 
+    if p_cause is not null then
+        insert into gold.restatement (snap_time, cause, total_before, total_after)
+        select o.snap_time, p_cause, o.total_eur, nw.total_eur
+        from _old_hours o join gold.portfolio_hourly nw using (snap_time)
+        where abs(nw.total_eur - o.total_eur) >= 0.01;
+        drop table if exists _old_hours;
+    end if;
     drop table if exists _h;
     return n;
 end $$;
@@ -359,7 +415,7 @@ end $$;
 -- ============ 6. 预警：触发和解除分开，各有阈值 ============
 create or replace function gold.evaluate_alerts() returns int
 language plpgsql as $$
-declare v_asof timestamptz; n int;
+declare v_asof timestamptz; n int; v_gross numeric; v_ok boolean;
 begin
     select max(as_of) into v_asof from gold.live_state;
     if v_asof is null then return 0; end if;
@@ -367,20 +423,66 @@ begin
     drop table if exists _cand;
     create temp table _cand (rule_id text, scope text, value numeric, breached boolean, ok boolean);
 
-    -- 组合层：回撤、未实现盈亏下降（和最近一个已完成的小时快照比）
+    -- 相对口径的分母：总敞口（持仓市值绝对值之和）。太小（刚开盘、几乎没有仓位）时百分比没有意义，不评估。
+    select coalesce(sum(abs(mv_eur)), 0) into v_gross from gold.live_state;
+    v_ok := v_gross >= 1000000;
+
+    -- 组合层：回撤、未实现盈亏下降（和最近一个已完成的小时快照比），都换成占总敞口的百分比（负数）
+    if v_ok then
+        insert into _cand
+        select r.rule_id, 'portfolio', round(v.value / v_gross * 100, 3),
+               v.value / v_gross * 100 <= -r.threshold, v.value / v_gross * 100 > -r.clear_threshold
+        from gold.alert_rules r
+        join (
+            select 'drawdown' as rule_id, l.tot - greatest(pk.m, l.tot) as value
+            from (select sum(total_eur) tot from gold.live_state) l,
+                 (select greatest(0, coalesce(max(total_eur), 0)) m from gold.portfolio_hourly) pk
+            where exists (select 1 from gold.portfolio_hourly)
+            union all
+            select 'unrealized_drop', l.unr - s.unrealized_eur
+            from (select sum(unrealized_eur) unr from gold.live_state) l,
+                 (select unrealized_eur from gold.portfolio_hourly order by snap_time desc limit 1) s
+        ) v on v.rule_id = r.rule_id;
+
+        -- 标的层：亏损过大（占总敞口的百分比）、集中度（市值占总敞口的百分比）
+        insert into _cand
+        select r.rule_id, i.short_name, round(l.total_eur / v_gross * 100, 3),
+               l.total_eur / v_gross * 100 <= -r.threshold, l.total_eur / v_gross * 100 > -r.clear_threshold
+        from gold.live_state l
+        join clean.instruments i using (instrument_id)
+        join gold.alert_rules r on r.rule_id = 'stock_loss';
+
+        insert into _cand
+        select r.rule_id, i.short_name, round(abs(l.mv_eur) / v_gross * 100, 2),
+               abs(l.mv_eur) / v_gross * 100 >= r.threshold, abs(l.mv_eur) / v_gross * 100 < r.clear_threshold
+        from gold.live_state l
+        join clean.instruments i using (instrument_id)
+        join gold.alert_rules r on r.rule_id = 'concentration';
+    end if;
+
+    -- 标的层：最新一条报价相对上一条报价跳了多少（%）
     insert into _cand
-    select r.rule_id, 'portfolio', v.value, v.value <= -r.threshold, v.value > -r.clear_threshold
+    select r.rule_id, i.short_name, round(abs(p.p1 / p.p0 - 1) * 100, 3),
+           abs(p.p1 / p.p0 - 1) * 100 >= r.threshold, abs(p.p1 / p.p0 - 1) * 100 < r.clear_threshold
+    from clean.instruments i
+    join gold.alert_rules r on r.rule_id = 'price_jump'
+    cross join lateral (
+        select (array_agg(price order by event_time desc))[1] p1, (array_agg(price order by event_time desc))[2] p0
+        from (select price, event_time from clean.prices where instrument_id = i.instrument_id
+              order by event_time desc limit 2) q
+    ) p
+    where i.type = 'equity' and p.p0 is not null and p.p0 > 0;
+
+    -- 数据层：最近 1000 条原始行里被拒绝的比例（%）
+    insert into _cand
+    select r.rule_id, 'pipeline', round(x.share, 2), x.share >= r.threshold, x.share < r.clear_threshold
     from gold.alert_rules r
-    join (
-        select 'drawdown' as rule_id, l.tot - greatest(pk.m, l.tot) as value
-        from (select sum(total_eur) tot from gold.live_state) l,
-             (select greatest(0, coalesce(max(total_eur), 0)) m from gold.portfolio_hourly) pk
-        where exists (select 1 from gold.portfolio_hourly)
-        union all
-        select 'unrealized_drop', l.unr - s.unrealized_eur
-        from (select sum(unrealized_eur) unr from gold.live_state) l,
-             (select unrealized_eur from gold.portfolio_hourly order by snap_time desc limit 1) s
-    ) v on v.rule_id = r.rule_id;
+    cross join lateral (
+        select 100.0 * (select count(*) from clean.dead_letter d where d.raw_id > ps.last_raw_id - 1000)
+               / greatest(least(ps.last_raw_id, 1000), 1) as share
+        from clean.process_state ps
+    ) x
+    where r.rule_id = 'bad_rows_spike';
 
     -- 标的层：交易时段内价格太久没更新
     insert into _cand
@@ -433,7 +535,7 @@ begin
     if r.o_from is not null then v_from := least(v_from, gold.ceil_hour(r.o_from)); end if;
     hours_rebuilt := 0;
     if v_from <= v_to then
-        perform gold.rebuild_hourly(v_from, v_to);
+        perform gold.rebuild_hourly(v_from, v_to, case when r.o_rewinds > 0 then 'late_trade' end);
         select count(distinct snap_time) into hours_rebuilt from gold.stock_hourly where snap_time >= date_trunc('hour', v_from);
     end if;
 
@@ -441,6 +543,11 @@ begin
     open_alerts := gold.evaluate_alerts();
 
     update gold.process_state set last_raw_id = to_raw_id, as_of = run.as_of, updated_at = now();
+
+    if to_raw_id >= from_raw_id then      -- 这一轮真的处理了新数据才记
+        insert into gold.run_log (from_raw_id, to_raw_id, instruments_touched, trades_replayed, late_rewinds, hours_rebuilt, as_of, open_alerts)
+        values (from_raw_id, to_raw_id, instruments_touched, trades_replayed, late_rewinds, hours_rebuilt, run.as_of, open_alerts);
+    end if;
 end $$;
 
 -- ============ 8. 收盘后批处理：从某个时间起重算小时快照 ============
@@ -452,5 +559,5 @@ declare v_to timestamptz;
 begin
     perform 1 from gold.process_state for update;    -- 和 gold.run() 互斥：不会和日常增量同时重算小时快照
     v_to := date_trunc('hour', greatest((select max(event_time) from clean.prices), (select max(event_time) from clean.trades)));
-    return gold.rebuild_hourly(p_from, v_to);
+    return gold.rebuild_hourly(p_from, v_to, 'nightly_fix');
 end $$;

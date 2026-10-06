@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1100" width="1800" height="1100" font-family="-apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3A4A63"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A84B0C"/>
+    </marker>
+    <marker id="arrowMuted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A93A3"/>
+    </marker>
+    <style>
+      .title { font-size: 30px; font-weight: 700; fill: #172033; }
+      .sub   { font-size: 16px; fill: #5A6577; }
+      .h     { font-size: 17px; font-weight: 700; fill: #172033; }
+      .hm    { font-size: 15.5px; font-weight: 700; fill: #172033; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .b     { font-size: 13.5px; fill: #2B3547; }
+      .bb    { font-size: 13.5px; font-weight: 700; fill: #172033; }
+      .m     { font-size: 13px; fill: #2B3547; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .ms    { font-size: 12px; fill: #2B3547; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .mm    { font-size: 12.5px; fill: #5A6577; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+      .mu    { font-size: 13px; fill: #5A6577; }
+      .band  { font-size: 14px; fill: #5A6577; }
+      .warn  { font-size: 13.5px; font-weight: 700; fill: #A84B0C; }
+      .lbl   { font-size: 11.5px; fill: #5A6577; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" fill="#FAFAF8"/>
+
+  <text x="60" y="70" class="title">Every raw line is accounted for, from one message to a P&amp;L number</text>
+  <text x="60" y="104" class="sub">market-sim · data flow · each box is a table, each arrow is one SQL step inside clean.run() or gold.run()</text>
+
+  <!-- ================= CLEAN BAND ================= -->
+  <rect x="40" y="140" width="1720" height="400" rx="14" fill="#EFF4FB" stroke="#D2DEEF"/>
+  <text x="64" y="172" class="band"><tspan class="hm" style="fill:#1F4E8C">clean.run()</tspan>   every 5 s · only rows with raw_id in (last_raw_id, max] · one transaction</text>
+
+  <!-- raw.events -->
+  <rect x="64" y="250" width="200" height="180" rx="10" fill="#E8EDF5" stroke="#C3CFE0"/>
+  <text x="84" y="284" class="hm">raw.events</text>
+  <text x="84" y="314" class="b">One row per line received,</text>
+  <text x="84" y="336" class="b">stored untouched</text>
+  <text x="84" y="372" class="b">raw_id = arrival order</text>
+  <text x="84" y="394" class="b">Duplicates and garbage</text>
+  <text x="84" y="416" class="b">are kept on purpose</text>
+
+  <line x1="264" y1="340" x2="308" y2="340" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- parse & validate -->
+  <rect x="310" y="200" width="290" height="290" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="330" y="234" class="h">Parse &amp; validate</text>
+  <text x="330" y="256" class="mm">clean.v_parsed (view)</text>
+  <circle cx="340" cy="288" r="10" fill="#1F4E8C"/><text x="340" y="292.5" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="358" y="293" class="b">Parse JSON, check type</text>
+  <circle cx="340" cy="318" r="10" fill="#1F4E8C"/><text x="340" y="322.5" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="358" y="323" class="b">Cast fields, check values</text>
+  <circle cx="340" cy="348" r="10" fill="#1F4E8C"/><text x="340" y="352.5" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="358" y="353" class="b">Join instruments dimension</text>
+  <text x="330" y="392" class="mu">Checks run in order; the first</text>
+  <text x="330" y="412" class="mu">failure becomes the reason.</text>
+  <text x="330" y="446" class="mu">Safe casts (pg_input_is_valid):</text>
+  <text x="330" y="466" class="mu">a broken row never fails the batch.</text>
+
+  <!-- split -->
+  <line x1="600" y1="345" x2="630" y2="345" stroke="#3A4A63" stroke-width="2"/>
+  <line x1="630" y1="235" x2="630" y2="345" stroke="#3A4A63" stroke-width="2"/>
+  <line x1="630" y1="235" x2="658" y2="235" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="630" y1="345" x2="658" y2="345" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="630" y1="345" x2="630" y2="455" stroke="#A84B0C" stroke-width="2"/>
+  <line x1="630" y1="455" x2="658" y2="455" stroke="#A84B0C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <text x="614" y="290" class="lbl" text-anchor="middle" transform="rotate(-90 614 290)">valid</text>
+  <text x="614" y="400" class="lbl" text-anchor="middle" transform="rotate(-90 614 400)" style="fill:#A84B0C">invalid</text>
+
+  <!-- outputs -->
+  <rect x="660" y="190" width="320" height="90" rx="10" fill="#EAF1FB" stroke="#B9CDEA"/>
+  <text x="680" y="222" class="hm">clean.trades</text>
+  <text x="680" y="246" class="b">PK trade_id</text>
+  <text x="680" y="266" class="b">→ re-sent trades are dropped</text>
+
+  <rect x="660" y="300" width="320" height="90" rx="10" fill="#EAF1FB" stroke="#B9CDEA"/>
+  <text x="680" y="332" class="hm">clean.prices</text>
+  <text x="680" y="356" class="b">PK (instrument_id, event_time)</text>
+  <text x="680" y="376" class="b">same price → duplicate · different ↓</text>
+
+  <rect x="660" y="410" width="320" height="90" rx="10" fill="#FCEFE3" stroke="#EBC3A0"/>
+  <text x="680" y="442" class="hm" style="fill:#A84B0C">clean.dead_letter</text>
+  <text x="680" y="466" class="b">Original payload + one reason</text>
+  <text x="680" y="486" class="b">Nothing is silently lost</text>
+
+  <line x1="940" y1="390" x2="940" y2="408" stroke="#A84B0C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+
+  <!-- bracket to reconciliation -->
+  <path d="M988,235 H1004 V455 H988" fill="none" stroke="#8A93A3" stroke-width="1.5"/>
+  <line x1="1004" y1="345" x2="1038" y2="345" stroke="#8A93A3" stroke-width="1.5" marker-end="url(#arrowMuted)"/>
+  <text x="1021" y="336" class="lbl" text-anchor="middle">count</text>
+
+  <!-- reconciliation -->
+  <rect x="1040" y="190" width="390" height="310" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <rect x="1040" y="190" width="6" height="310" fill="#1F4E8C"/>
+  <text x="1066" y="222" class="h">Reconciliation on every run</text>
+  <text x="1066" y="244" class="mm">→ clean.run_log</text>
+  <text x="1066" y="286" class="m">raw rows = bad + good</text>
+  <text x="1066" y="312" class="m">good     = kept + conflicts + dups</text>
+  <text x="1066" y="338" class="m">balanced = both equations hold</text>
+  <text x="1066" y="380" class="b">Every term is counted on its own,</text>
+  <text x="1066" y="402" class="b">never derived by subtraction.</text>
+  <text x="1066" y="438" class="b">Progress pointer and writes commit</text>
+  <text x="1066" y="460" class="b">together, under a row lock:</text>
+  <text x="1066" y="482" class="b">no gaps, no double processing.</text>
+
+  <!-- reasons -->
+  <rect x="1460" y="190" width="276" height="310" rx="10" fill="#FCEFE3" stroke="#EBC3A0"/>
+  <text x="1480" y="222" class="h" style="fill:#A84B0C">12 rejection reasons</text>
+  <text x="1480" y="248" class="lbl">FORMAT</text>
+  <text x="1480" y="266" class="ms">not_json · unknown_type</text>
+  <text x="1480" y="284" class="ms">bad_instrument_id · bad_date</text>
+  <text x="1480" y="310" class="lbl">VALUE</text>
+  <text x="1480" y="328" class="ms">null_price</text>
+  <text x="1480" y="346" class="ms">non_positive_price</text>
+  <text x="1480" y="364" class="ms">bad_trade_id · bad_volume</text>
+  <text x="1480" y="382" class="ms">bad_side</text>
+  <text x="1480" y="408" class="lbl">REFERENCE</text>
+  <text x="1480" y="426" class="ms">unknown_instrument</text>
+  <text x="1480" y="444" class="ms">currency_mismatch</text>
+  <text x="1480" y="470" class="lbl">CONSISTENCY</text>
+  <text x="1480" y="488" class="ms">conflicting_price</text>
+
+  <!-- ================= GOLD BAND ================= -->
+  <rect x="40" y="580" width="1720" height="420" rx="14" fill="#FBF6E8" stroke="#ECDFB8"/>
+  <text x="64" y="612" class="band"><tspan class="hm" style="fill:#7A5A00">gold.run()</tspan>   same cycle, right after clean · late trades trigger a local replay · hours valued as-of event time</text>
+
+  <!-- G0: inputs -->
+  <rect x="64" y="650" width="200" height="140" rx="10" fill="#EAF1FB" stroke="#B9CDEA" stroke-dasharray="5 4"/>
+  <text x="84" y="682" class="h">New clean rows</text>
+  <text x="84" y="712" class="m">clean.trades</text>
+  <text x="84" y="733" class="m">clean.prices</text>
+  <text x="84" y="768" class="mu">this raw_id window only</text>
+
+  <line x1="264" y1="720" x2="308" y2="720" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- G1: position_state -->
+  <rect x="310" y="650" width="320" height="140" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="330" y="682" class="hm">gold.position_state</text>
+  <text x="330" y="704" class="mm">apply_new_trades()</text>
+  <text x="330" y="732" class="b">Average cost after every trade; shorts</text>
+  <text x="330" y="754" class="b">and trades crossing zero handled</text>
+  <text x="330" y="778" class="warn">Late trade → replay that instrument</text>
+
+  <line x1="630" y1="720" x2="678" y2="720" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- G2: stock_hourly -->
+  <rect x="680" y="650" width="330" height="140" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="700" y="682" class="hm">gold.stock_hourly</text>
+  <text x="700" y="704" class="mm">rebuild_hourly() · instrument × hour</text>
+  <text x="700" y="732" class="b">As-of snapshot: latest position, price</text>
+  <text x="700" y="754" class="b">and FX with event_time ≤ the hour</text>
+  <text x="700" y="778" class="b">Local ccy · EUR @ market FX · @ fixed FX</text>
+
+  <line x1="1010" y1="720" x2="1058" y2="720" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- G3: portfolio_hourly -->
+  <rect x="1060" y="650" width="300" height="140" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="1080" y="682" class="hm">gold.portfolio_hourly</text>
+  <text x="1080" y="704" class="mm">one row per hour</text>
+  <text x="1080" y="732" class="b">Realized / unrealized / total P&amp;L</text>
+  <text x="1080" y="754" class="b">Long, short, gross, net exposure</text>
+  <text x="1080" y="778" class="b">Running peak and drawdown</text>
+
+  <!-- serving -->
+  <line x1="1360" y1="700" x2="1408" y2="700" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="1410" y="650" width="326" height="140" rx="10" fill="#FFFFFF" stroke="#D5DBE4"/>
+  <text x="1430" y="682" class="h">FastAPI → dashboards</text>
+  <text x="1430" y="712" class="b">API reads gold only, no P&amp;L math</text>
+  <text x="1430" y="734" class="b">Live P&amp;L refreshes every 5 s</text>
+  <text x="1430" y="756" class="b">Quality page reads run logs,</text>
+  <text x="1430" y="776" class="b">dead_letter and restatement</text>
+
+  <!-- row 2 -->
+  <line x1="470" y1="790" x2="470" y2="848" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="310" y="850" width="320" height="130" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="330" y="882" class="hm">gold.live_state</text>
+  <text x="330" y="904" class="mm">refresh_live() · 1 row per instrument</text>
+  <text x="330" y="932" class="b">Position × newest quote by event time,</text>
+  <text x="330" y="954" class="b">price age, in trading session?</text>
+
+  <line x1="845" y1="850" x2="845" y2="792" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="853" y="826" class="lbl">rate to EUR</text>
+  <rect x="680" y="850" width="330" height="130" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="700" y="882" class="hm">gold.fx_rate_hourly</text>
+  <text x="700" y="904" class="mm">currency × hour, chained via USD</text>
+  <text x="700" y="934" class="ms">GBP→EUR = GBP/USD ÷ EUR/USD</text>
+  <text x="700" y="956" class="ms">JPY→EUR = 1 ÷ USD/JPY ÷ EUR/USD</text>
+
+  <line x1="1210" y1="790" x2="1210" y2="848" stroke="#3A4A63" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="1060" y="850" width="300" height="130" rx="10" fill="#FFFFFF" stroke="#E6D49E"/>
+  <text x="1080" y="882" class="hm">gold.alerts</text>
+  <text x="1080" y="904" class="mm">evaluate_alerts() · 7 rules</text>
+  <text x="1080" y="932" class="b">Fire and clear at different</text>
+  <text x="1080" y="954" class="b">thresholds → no flapping</text>
+
+  <path d="M1360,760 H1385 V915 H1408" fill="none" stroke="#A84B0C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <rect x="1410" y="850" width="326" height="130" rx="10" fill="#FCEFE3" stroke="#EBC3A0"/>
+  <text x="1430" y="882" class="hm" style="fill:#A84B0C">gold.restatement</text>
+  <text x="1430" y="904" class="mm">audit of re-valued hours</text>
+  <text x="1430" y="932" class="b">hour · cause · total before → after</text>
+  <text x="1430" y="954" class="b">cause: late_trade | nightly_fix</text>
+
+  <!-- footer -->
+  <text x="60" y="1042" class="b"><tspan class="bb">Two clocks.</tspan> raw_id (arrival order) drives incremental processing; event_time drives valuation, so late data still lands in the right hour.</text>
+  <text x="60" y="1068" class="mu">Reconciliation, dead letter and restatement are ordinary tables you can query; the Data Quality page is built on them.</text>
+</svg>
