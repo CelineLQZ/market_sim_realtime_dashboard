@@ -1,57 +1,90 @@
--- gold 层 · 4/6 实时状态
--- gold.refresh_live：每个标的一行的"现在"，每次运行覆盖。
+-- Gold live snapshot: one current row per equity, replaced on every run.
+-- Input selection is live-specific; FX and valuation formulas are shared with
+-- the hourly path through gold.fx_rates_at() and gold.value_position().
 
--- ============ 实时状态：每个标的一行，每次运行覆盖 ============
--- 价格取"事件时间最新"的报价，所以迟到的旧报价不会改变当前估值。
 create or replace function gold.refresh_live() returns timestamptz
 language plpgsql as $$
-declare v_asof timestamptz;
-        v_eurusd uuid; v_gbpusd uuid; v_usdjpy uuid;
-        eurusd numeric; gbpusd numeric; usdjpy numeric;
+declare v_as_of timestamptz;
 begin
-    select greatest((select max(event_time) from clean.prices), (select max(event_time) from clean.trades)) into v_asof;
-    if v_asof is null then return null; end if;
-    select instrument_id into v_eurusd from clean.instruments where short_name = 'EUR/USD';
-    select instrument_id into v_gbpusd from clean.instruments where short_name = 'GBP/USD';
-    select instrument_id into v_usdjpy from clean.instruments where short_name = 'USD/JPY';
-    select price into eurusd from clean.prices where instrument_id = v_eurusd order by event_time desc limit 1;
-    select price into gbpusd from clean.prices where instrument_id = v_gbpusd order by event_time desc limit 1;
-    select price into usdjpy from clean.prices where instrument_id = v_usdjpy order by event_time desc limit 1;
-    delete from gold.live_state;
-    if eurusd is null or gbpusd is null or usdjpy is null then return v_asof; end if;
+    select greatest(
+        (select max(event_time) from clean.prices),
+        (select max(event_time) from clean.trades)
+    ) into v_as_of;
 
-    -- 写明列名：旧表的新增列在最后，不能靠位置对应
-    insert into gold.live_state
-        (instrument_id, position, avg_cost, last_price, price_time, price_age_min, in_session,
-         realized_local, unrealized_local, mv_local, fx_rate, realized_eur, unrealized_eur, total_eur, mv_eur, as_of,
-         realized_eur_cfx, unrealized_eur_cfx, total_eur_cfx)
-    select i.instrument_id, coalesce(ps.qty_after, 0), coalesce(ps.avg_cost, 0), px.price, px.event_time,
-           extract(epoch from (v_asof - px.event_time)) / 60,
-           exists (select 1 from clean.exchange_sessions s
-                   where s.exchange = i.exchange and extract(isodow from v_asof) <= 5
-                     and (v_asof at time zone 'UTC')::time >= s.open_utc and (v_asof at time zone 'UTC')::time < s.close_utc),
-           coalesce(ps.realized_cum, 0),
-           coalesce(ps.qty_after, 0) * (px.price - coalesce(ps.avg_cost, 0)),
-           coalesce(ps.qty_after, 0) * px.price,
-           r.rate,
-           coalesce(ps.realized_cum, 0) * r.rate,
-           coalesce(ps.qty_after, 0) * (px.price - coalesce(ps.avg_cost, 0)) * r.rate,
-           (coalesce(ps.realized_cum, 0) + coalesce(ps.qty_after, 0) * (px.price - coalesce(ps.avg_cost, 0))) * r.rate,
-           coalesce(ps.qty_after, 0) * px.price * r.rate,
-           v_asof,
-           -- 固定汇率口径：用 gold.fx_reference 里的参考汇率（还没有参考汇率时，退回当前汇率）
-           coalesce(ps.realized_cum, 0) * coalesce(ref.rate_to_eur, r.rate),
-           coalesce(ps.qty_after, 0) * (px.price - coalesce(ps.avg_cost, 0)) * coalesce(ref.rate_to_eur, r.rate),
-           (coalesce(ps.realized_cum, 0) + coalesce(ps.qty_after, 0) * (px.price - coalesce(ps.avg_cost, 0)))
-               * coalesce(ref.rate_to_eur, r.rate)
-    from clean.instruments i
-    join lateral (select price, event_time from clean.prices p where p.instrument_id = i.instrument_id
-                  order by p.event_time desc limit 1) px on true
-    left join lateral (select qty_after, avg_cost, realized_cum from gold.position_state s
-                       where s.instrument_id = i.instrument_id order by s.event_time desc, s.raw_id desc limit 1) ps on true
-    join (values ('EUR', 1::numeric), ('USD', 1 / eurusd), ('GBP', gbpusd / eurusd), ('JPY', 1 / usdjpy / eurusd)) r(ccy, rate)
-         on r.ccy = i.currency
-    left join gold.fx_reference ref on ref.ccy = i.currency
-    where i.type = 'equity';
-    return v_asof;
+    if v_as_of is null then
+        return null;
+    end if;
+
+    delete from gold.live_state;
+
+    insert into gold.live_state (
+        instrument_id, position, avg_cost, last_price, price_time,
+        price_age_min, in_session, realized_local, unrealized_local,
+        mv_local, fx_rate, realized_eur, unrealized_eur, total_eur,
+        mv_eur, as_of, realized_eur_cfx, unrealized_eur_cfx, total_eur_cfx
+    )
+    with current_state as (
+        select
+            i.instrument_id,
+            i.exchange,
+            coalesce(ps.qty_after, 0) as position,
+            coalesce(ps.avg_cost, 0) as avg_cost,
+            px.price,
+            px.event_time as price_time,
+            coalesce(ps.realized_cum, 0) as realized_local,
+            fx.rate_to_eur as market_fx,
+            coalesce(ref.rate_to_eur, fx.rate_to_eur) as constant_fx
+        from clean.instruments i
+        join lateral (
+            select p.price, p.event_time
+            from clean.prices p
+            where p.instrument_id = i.instrument_id
+            order by p.event_time desc
+            limit 1
+        ) px on true
+        left join lateral (
+            select s.qty_after, s.avg_cost, s.realized_cum
+            from gold.position_state s
+            where s.instrument_id = i.instrument_id
+            order by s.event_time desc, s.raw_id desc
+            limit 1
+        ) ps on true
+        join gold.fx_rates_at(v_as_of) fx on fx.ccy = i.currency
+        left join gold.fx_reference ref on ref.ccy = i.currency
+        where i.type = 'equity'
+    )
+    select
+        s.instrument_id,
+        s.position,
+        s.avg_cost,
+        s.price,
+        s.price_time,
+        extract(epoch from (v_as_of - s.price_time)) / 60,
+        exists (
+            select 1
+            from clean.exchange_sessions session
+            where session.exchange = s.exchange
+              and extract(isodow from v_as_of) <= 5
+              and (v_as_of at time zone 'UTC')::time >= session.open_utc
+              and (v_as_of at time zone 'UTC')::time < session.close_utc
+        ),
+        s.realized_local,
+        v.unrealized_local,
+        v.mv_local,
+        s.market_fx,
+        v.realized_eur,
+        v.unrealized_eur,
+        v.total_eur,
+        v.mv_eur,
+        v_as_of,
+        v.realized_eur_cfx,
+        v.unrealized_eur_cfx,
+        v.total_eur_cfx
+    from current_state s
+    cross join lateral gold.value_position(
+        s.position, s.avg_cost, s.price, s.realized_local,
+        s.market_fx, s.constant_fx
+    ) v;
+
+    return v_as_of;
 end $$;

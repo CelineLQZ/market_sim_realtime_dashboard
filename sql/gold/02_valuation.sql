@@ -1,0 +1,75 @@
+-- Gold shared calculations.
+--
+-- Keep FX conversion and position valuation in one place. Both the hourly
+-- history and live snapshot call these helpers, preventing formula drift.
+
+-- Return "1 unit of currency = EUR" at an event-time cut-off. No rows are
+-- returned until all three source FX quotes exist, preserving the previous
+-- all-or-nothing behaviour.
+create or replace function gold.fx_rates_at(p_at timestamptz)
+returns table (ccy text, rate_to_eur numeric)
+language sql stable as $$
+    with fx_instruments as (
+        select
+            max(instrument_id::text) filter (where short_name = 'EUR/USD')::uuid as eurusd_id,
+            max(instrument_id::text) filter (where short_name = 'GBP/USD')::uuid as gbpusd_id,
+            max(instrument_id::text) filter (where short_name = 'USD/JPY')::uuid as usdjpy_id
+        from clean.instruments
+    ),
+    quotes as (
+        select
+            (select price from clean.prices
+             where instrument_id = i.eurusd_id and event_time <= p_at
+             order by event_time desc limit 1) as eurusd,
+            (select price from clean.prices
+             where instrument_id = i.gbpusd_id and event_time <= p_at
+             order by event_time desc limit 1) as gbpusd,
+            (select price from clean.prices
+             where instrument_id = i.usdjpy_id and event_time <= p_at
+             order by event_time desc limit 1) as usdjpy
+        from fx_instruments i
+    )
+    select r.ccy, r.rate_to_eur
+    from quotes q
+    cross join lateral (values
+        ('EUR', 1::numeric),
+        ('USD', 1 / q.eurusd),
+        ('GBP', q.gbpusd / q.eurusd),
+        ('JPY', 1 / q.usdjpy / q.eurusd)
+    ) r(ccy, rate_to_eur)
+    where q.eurusd is not null and q.gbpusd is not null and q.usdjpy is not null
+$$;
+
+
+-- Apply P&L formulas to an already selected position, mark and FX rate.
+-- Finding the correct as-of inputs remains the caller's responsibility.
+create or replace function gold.value_position(
+    p_position numeric,
+    p_avg_cost numeric,
+    p_price numeric,
+    p_realized_local numeric,
+    p_market_fx numeric,
+    p_constant_fx numeric
+) returns table (
+    unrealized_local numeric,
+    mv_local numeric,
+    realized_eur numeric,
+    unrealized_eur numeric,
+    total_eur numeric,
+    mv_eur numeric,
+    realized_eur_cfx numeric,
+    unrealized_eur_cfx numeric,
+    total_eur_cfx numeric
+)
+language sql immutable as $$
+    select
+        p_position * (p_price - p_avg_cost),
+        p_position * p_price,
+        p_realized_local * p_market_fx,
+        p_position * (p_price - p_avg_cost) * p_market_fx,
+        (p_realized_local + p_position * (p_price - p_avg_cost)) * p_market_fx,
+        p_position * p_price * p_market_fx,
+        p_realized_local * p_constant_fx,
+        p_position * (p_price - p_avg_cost) * p_constant_fx,
+        (p_realized_local + p_position * (p_price - p_avg_cost)) * p_constant_fx
+$$;

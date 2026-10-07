@@ -15,12 +15,15 @@
 --   gold.run()            日常运行入口，增量处理新数据（实时循环里反复调用）
 --   gold.nightly_fix(t)   收盘后批处理：从 t 起重算小时快照，补上迟到的报价
 --   gold.apply_new_trades / gold.rebuild_hourly / gold.refresh_live / gold.evaluate_alerts   run() 内部用
+--   gold.fx_rates_at / gold.value_position   小时与实时路径共用的汇率和估值公式
+--   gold.rebuild_fx_hourly / rebuild_stock_hourly / rebuild_portfolio_hourly   小时重算的三个可独立测试步骤
 --
 -- 运行：psql marketsim -v ON_ERROR_STOP=1 -f sql/gold/install.sql     （建表和函数，可重复运行）
 --       psql marketsim -c "select * from gold.run()"             （处理新数据）
 
 -- 代码按职责拆在 sql/gold/ 下，这里按顺序引入（\ir = 相对本文件的路径）：
 \ir 01_tables.sql
+\ir 02_valuation.sql
 \ir 02_positions.sql
 \ir 03_hourly.sql
 \ir 04_live.sql
