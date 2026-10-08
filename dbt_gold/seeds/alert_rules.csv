@@ -1,0 +1,3 @@
+rule_id,description,threshold,clear_threshold,severity,unit
+drawdown,Total P&L fell from its peak (% of gross exposure),0.6,0.4,high,%gross
+stock_loss,One stock total P&L below -x% of gross exposure,0.3,0.2,medium,%gross

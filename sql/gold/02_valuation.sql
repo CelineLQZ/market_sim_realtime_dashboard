@@ -1,11 +1,10 @@
--- Gold shared calculations.
+-- Gold layer · 2/5 shared valuation
 --
--- Keep FX conversion and position valuation in one place. Both the hourly
--- history and live snapshot call these helpers, preventing formula drift.
+-- FX conversion and position valuation live in one place. The hourly history and the
+-- live snapshot both call these helpers, so the formulas cannot drift apart.
 
--- Return "1 unit of currency = EUR" at an event-time cut-off. No rows are
--- returned until all three source FX quotes exist, preserving the previous
--- all-or-nothing behaviour.
+-- Return "1 unit of currency = EUR" as of an event-time cut-off. No rows are returned
+-- until all three FX quotes exist (all-or-nothing).
 create or replace function gold.fx_rates_at(p_at timestamptz)
 returns table (ccy text, rate_to_eur numeric)
 language sql stable as $$
@@ -41,35 +40,31 @@ language sql stable as $$
 $$;
 
 
--- Apply P&L formulas to an already selected position, mark and FX rate.
--- Finding the correct as-of inputs remains the caller's responsibility.
+-- Apply the P&L formulas to an already selected position, price and FX rate.
+-- Finding the correct as-of inputs is the caller's job.
+--   unrealized = position x (price - average cost)
+--   market value = position x price
+--   realized_eur = realized_local x FX  (proceeds are treated as foreign cash, valued at the current rate)
 create or replace function gold.value_position(
-    p_position numeric,
-    p_avg_cost numeric,
-    p_price numeric,
+    p_position       numeric,
+    p_avg_cost       numeric,
+    p_price          numeric,
     p_realized_local numeric,
-    p_market_fx numeric,
-    p_constant_fx numeric
+    p_fx             numeric
 ) returns table (
     unrealized_local numeric,
-    mv_local numeric,
-    realized_eur numeric,
-    unrealized_eur numeric,
-    total_eur numeric,
-    mv_eur numeric,
-    realized_eur_cfx numeric,
-    unrealized_eur_cfx numeric,
-    total_eur_cfx numeric
+    mv_local         numeric,
+    realized_eur     numeric,
+    unrealized_eur   numeric,
+    total_eur        numeric,
+    mv_eur           numeric
 )
 language sql immutable as $$
     select
         p_position * (p_price - p_avg_cost),
         p_position * p_price,
-        p_realized_local * p_market_fx,
-        p_position * (p_price - p_avg_cost) * p_market_fx,
-        (p_realized_local + p_position * (p_price - p_avg_cost)) * p_market_fx,
-        p_position * p_price * p_market_fx,
-        p_realized_local * p_constant_fx,
-        p_position * (p_price - p_avg_cost) * p_constant_fx,
-        (p_realized_local + p_position * (p_price - p_avg_cost)) * p_constant_fx
+        p_realized_local * p_fx,
+        p_position * (p_price - p_avg_cost) * p_fx,
+        (p_realized_local + p_position * (p_price - p_avg_cost)) * p_fx,
+        p_position * p_price * p_fx
 $$;

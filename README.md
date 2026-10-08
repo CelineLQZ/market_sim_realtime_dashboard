@@ -68,7 +68,7 @@ JPY -> EUR :  amount / USD/JPY / EUR/USD
 - **Correlated prices**: each equity has a `beta` to a common market factor plus its own noise;
   `annual_vol` is the instrument's total volatility.
 - **Fast clock**: simulated time runs faster than real time (`--sim-seconds-per-message`).
-- **Late data**: by default about 3% of messages are stamped slightly earlier than the previous
+- **Late data**: by default about 0.5% of messages are stamped slightly earlier than the previous
   ones (still inside their own session). Good for practising watermarks.
 - **FX has quotes only**, no trades. A trade's currency always matches its instrument.
 
@@ -82,7 +82,7 @@ JPY -> EUR :  amount / USD/JPY / EUR/USD
 | `--start` | `2025-01-06T00:00:00Z` | simulated start (use a Monday, UTC) |
 | `--sim-seconds-per-message` | 30 | mean simulated gap between messages |
 | `--trade-ratio` | 0.55 | share of trades while equities are open |
-| `--late-prob` | 0.03 | share of out-of-order timestamps |
+| `--late-prob` | 0.005 | share of out-of-order timestamps |
 | `--duplicate-prob` | 0 | share of messages sent twice |
 | `--bad-prob` | 0 | share of corrupted messages (null or negative price, zero volume, unknown instrument, bad side, garbage line) |
 | `--max-messages` | 0 (endless) | stop after N messages |

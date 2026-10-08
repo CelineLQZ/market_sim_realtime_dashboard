@@ -1,66 +1,83 @@
--- gold 层 · 2/6 持仓
--- gold.apply_new_trades：把新到的成交逐笔算成持仓、平均成本、已实现盈亏；迟到的成交会让该标的从那个时间点起重放。
-
--- ============ 小工具：向上取整到整点 ============
-create or replace function gold.ceil_hour(t timestamptz) returns timestamptz
-language sql immutable as $$
-    select case when t = date_trunc('hour', t) then t else date_trunc('hour', t) + interval '1 hour' end
-$$;
-
--- ============ 持仓状态：逐笔成交算平均成本 ============
--- 规则（平均成本法，支持空头，一笔成交可以跨过 0）：
---   同方向加仓：新平均成本 = 数量加权平均
---   反方向平仓：实现盈亏 = 平掉的数量 x (成交价 - 平均成本) x 原持仓方向；部分平仓不改变平均成本
---   跨过 0：先平掉原来的持仓，剩下的部分按成交价重新开仓
--- 迟到处理：新到的成交如果事件时间比已处理的更早，就从这个时间点起把该标的重放一遍。
-create or replace function gold.apply_new_trades(p_lo bigint, p_hi bigint,
-    out o_instruments int, out o_replayed int, out o_rewinds int, out o_from timestamptz)
+-- Gold layer · 3/5 positions
+-- gold.apply_new_trades: turn trades into position, average cost and realized P&L, one trade at a time.
+--
+-- Window: only trades with p_from < event_time <= p_to are processed (p_to is the watermark).
+-- Inside the window the trades of each instrument are sorted by (event_time, raw_id), so the order
+-- is always correct. State is append-only: nothing is deleted or replayed. A trade that arrives
+-- after the watermark has already passed its event time is skipped (counted by gold.run()).
+--
+-- Rules (average-cost method, shorts allowed, one trade may cross zero):
+--   same direction as the position:  new average cost = quantity-weighted average
+--   opposite direction (closing):    realized = closed qty x (price - average cost) x sign(position)
+--                                    a partial close leaves the average cost unchanged
+--   crossing zero:                   close the old position first, open the rest at the trade price
+--   flat:                            average cost = 0
+--
+-- Example: buy 100 @ 10, buy 100 @ 12 (avg 11, position 200), sell 50 @ 13 -> realized +100;
+--          sell 250 @ 12 -> closes 150 (+150), opens short 100 @ 12, cumulative realized 250.
+create or replace function gold.apply_new_trades(p_from timestamptz, p_to timestamptz,
+    out o_instruments int, out o_trades int)
 language plpgsql as $$
 declare
-    inst record; f record;
-    rt timestamptz; rr bigint; prev_max timestamptz;
-    pos numeric; avg numeric; rc numeric; q numeric; closing numeric; rd numeric; newpos numeric;
+    inst           record;
+    t              record;
+    v_position     numeric;    -- position before the trade, then after it
+    v_avg_cost     numeric;
+    v_realized_cum numeric;
+    v_signed_qty   numeric;    -- buy is positive, sell is negative
+    v_closed_qty   numeric;    -- part of the trade that closes the existing position
+    v_realized_delta numeric;
+    v_new_position numeric;
 begin
-    o_instruments := 0; o_replayed := 0; o_rewinds := 0; o_from := null;
-    for inst in select distinct instrument_id from clean.trades where raw_id > p_lo and raw_id <= p_hi loop
-        -- 本次新到的成交里，排序键 (event_time, raw_id) 最小的一笔：从这里开始重放
-        select event_time, raw_id into rt, rr from clean.trades
-        where instrument_id = inst.instrument_id and raw_id > p_lo and raw_id <= p_hi
-        order by event_time, raw_id limit 1;
+    o_instruments := 0; o_trades := 0;
 
-        select max(event_time) into prev_max from gold.position_state where instrument_id = inst.instrument_id;
-        if prev_max is not null and rt < prev_max then o_rewinds := o_rewinds + 1; end if;   -- 迟到
-        o_from := least(coalesce(o_from, rt), rt);
+    for inst in select distinct instrument_id from clean.trades
+                where event_time > p_from and event_time <= p_to loop
 
-        delete from gold.position_state
-        where instrument_id = inst.instrument_id and (event_time, raw_id) >= (rt, rr);
+        -- Start from the last stored state of this instrument (flat if there is none)
+        select ps.qty_after, ps.avg_cost, ps.realized_cum
+          into v_position, v_avg_cost, v_realized_cum
+        from gold.position_state ps
+        where ps.instrument_id = inst.instrument_id
+        order by ps.event_time desc, ps.raw_id desc
+        limit 1;
+        v_position := coalesce(v_position, 0);
+        v_avg_cost := coalesce(v_avg_cost, 0);
+        v_realized_cum := coalesce(v_realized_cum, 0);
 
-        select qty_after, avg_cost, realized_cum into pos, avg, rc from gold.position_state
-        where instrument_id = inst.instrument_id order by event_time desc, raw_id desc limit 1;
-        pos := coalesce(pos, 0); avg := coalesce(avg, 0); rc := coalesce(rc, 0);
-
-        for f in select trade_id, event_time, raw_id, price, volume, side from clean.trades
-                 where instrument_id = inst.instrument_id and (event_time, raw_id) >= (rt, rr)
+        for t in select trade_id, event_time, raw_id, price, volume, side from clean.trades
+                 where instrument_id = inst.instrument_id and event_time > p_from and event_time <= p_to
                  order by event_time, raw_id loop
-            q := case when f.side = 'BUY' then f.volume else -f.volume end;
-            rd := 0;
-            if pos = 0 or sign(pos) = sign(q) then
-                newpos := pos + q;
-                avg := (abs(pos) * avg + abs(q) * f.price) / abs(newpos);
+
+            v_signed_qty := case when t.side = 'BUY' then t.volume else -t.volume end;
+            v_realized_delta := 0;
+
+            if v_position = 0 or sign(v_position) = sign(v_signed_qty) then
+                -- opening or adding: weighted average cost
+                v_new_position := v_position + v_signed_qty;
+                v_avg_cost := (abs(v_position) * v_avg_cost + abs(v_signed_qty) * t.price) / abs(v_new_position);
             else
-                closing := least(abs(q), abs(pos));
-                rd := closing * (f.price - avg) * sign(pos);
-                newpos := pos + q;
-                if newpos = 0 then avg := 0;
-                elsif sign(newpos) <> sign(pos) then avg := f.price;
+                -- closing (maybe crossing zero): only the overlapping quantity realizes P&L
+                v_closed_qty := least(abs(v_signed_qty), abs(v_position));
+                v_realized_delta := v_closed_qty * (t.price - v_avg_cost) * sign(v_position);
+                v_new_position := v_position + v_signed_qty;
+                if v_new_position = 0 then
+                    v_avg_cost := 0;
+                elsif sign(v_new_position) <> sign(v_position) then
+                    v_avg_cost := t.price;     -- crossed zero: the remainder opens at the trade price
                 end if;
             end if;
-            pos := newpos; rc := rc + rd;
+
+            v_position := v_new_position;
+            v_realized_cum := v_realized_cum + v_realized_delta;
+
             insert into gold.position_state
                 (trade_id, instrument_id, event_time, raw_id, price, signed_qty, qty_after, avg_cost, realized_delta, realized_cum)
-            values (f.trade_id, inst.instrument_id, f.event_time, f.raw_id, f.price, q, pos, avg, rd, rc);
-            o_replayed := o_replayed + 1;
+            values
+                (t.trade_id, inst.instrument_id, t.event_time, t.raw_id, t.price, v_signed_qty, v_position, v_avg_cost, v_realized_delta, v_realized_cum);
+            o_trades := o_trades + 1;
         end loop;
+
         o_instruments := o_instruments + 1;
     end loop;
 end $$;

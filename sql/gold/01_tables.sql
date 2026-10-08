@@ -1,82 +1,88 @@
--- gold 层 · 1/6 表
--- 看板直接读取的表。表之间的关系见 README 的数据模型图。
+-- Gold layer · 1/5 tables
+-- The tables the dashboard reads. See the data-model diagram in the README.
 
 create schema if not exists gold;
 
-create table if not exists gold.fx_reference (
-    ccy         text primary key,
-    rate_to_eur numeric     not null,        -- 1 单位该币种 = 多少欧元
-    as_of       timestamptz not null
-);
+-- ============ Clean-up of the previous design (safe to run repeatedly) ============
+-- Constant-FX columns, alerts, drawdown and exposure were removed, and gold.run() now works
+-- with an event-time watermark. Old derived tables are dropped and rebuilt by the next gold.run().
+drop function if exists gold.run();
+drop function if exists gold.nightly_fix(timestamptz);
+drop function if exists gold.evaluate_alerts();
+drop function if exists gold.ceil_hour(timestamptz);
+drop function if exists gold.apply_new_trades(bigint, bigint);
+drop function if exists gold.value_position(numeric, numeric, numeric, numeric, numeric, numeric);
+drop table if exists gold.alerts, gold.alert_rules, gold.fx_reference cascade;
+do $$
+begin
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'gold' and column_name in ('total_eur_cfx', 'price_age_min')) then
+        drop table if exists gold.stock_hourly, gold.portfolio_hourly, gold.live_state,
+                             gold.position_state, gold.fx_rate_hourly cascade;
+        if to_regclass('gold.process_state') is not null then
+            delete from gold.process_state;
+        end if;
+    end if;
+end $$;
 
+-- ============ Tables ============
 create table if not exists gold.fx_rate_hourly (
     snap_time   timestamptz not null,
     ccy         text        not null,
-    rate_to_eur numeric     not null,
+    rate_to_eur numeric     not null,          -- 1 unit of this currency = how many EUR
     primary key (snap_time, ccy)
 );
 
+-- One row per trade, appended in event-time order once the watermark has passed the trade.
 create table if not exists gold.position_state (
-    trade_id      uuid primary key,
-    instrument_id uuid        not null,
-    event_time    timestamptz not null,
-    raw_id        bigint      not null,
-    price         numeric     not null,
-    signed_qty    numeric     not null,      -- 买为正，卖为负
-    qty_after     numeric     not null,      -- 这笔成交之后的持仓（空头为负）
-    avg_cost      numeric     not null,      -- 这笔成交之后的平均成本
-    realized_delta numeric    not null,      -- 这笔成交实现的盈亏（本币）
-    realized_cum  numeric     not null,      -- 该标的累计已实现盈亏（本币）
+    trade_id       uuid primary key,
+    instrument_id  uuid        not null,
+    event_time     timestamptz not null,
+    raw_id         bigint      not null,
+    price          numeric     not null,
+    signed_qty     numeric     not null,       -- buy is positive, sell is negative
+    qty_after      numeric     not null,       -- position after this trade (short is negative)
+    avg_cost       numeric     not null,       -- average cost after this trade
+    realized_delta numeric     not null,       -- P&L realized by this trade (local currency)
+    realized_cum   numeric     not null,       -- cumulative realized P&L of the instrument (local currency)
     unique (instrument_id, event_time, raw_id)
 );
 create index if not exists position_state_order on gold.position_state (instrument_id, event_time desc, raw_id desc);
 
+-- Core fact table: instrument x hour. A snapshot is written only after the watermark has passed the hour.
 create table if not exists gold.stock_hourly (
-    snap_time          timestamptz not null,   -- 快照时刻：这个整点时的状态
-    instrument_id      uuid        not null,
-    position           numeric     not null,
-    avg_cost           numeric     not null,
-    price              numeric     not null,   -- 截至该时刻的最新报价
-    price_time         timestamptz not null,
-    realized_local     numeric     not null,   -- 本币
-    unrealized_local   numeric     not null,
-    mv_local           numeric     not null,   -- 持仓市值 = 持仓 x 价格
-    fx_rate            numeric     not null,   -- 该时刻的汇率
-    realized_eur       numeric     not null,   -- 市场汇率口径（每个时刻用当时的汇率）
-    unrealized_eur     numeric     not null,
-    total_eur          numeric     not null,
-    mv_eur             numeric     not null,
-    realized_eur_cfx   numeric     not null,   -- 固定汇率口径（Constant FX）
-    unrealized_eur_cfx numeric     not null,
-    total_eur_cfx      numeric     not null,
+    snap_time        timestamptz not null,     -- the full hour this snapshot describes
+    instrument_id    uuid        not null,
+    position         numeric     not null,
+    avg_cost         numeric     not null,
+    price            numeric     not null,     -- latest price at or before snap_time
+    price_time       timestamptz not null,
+    realized_local   numeric     not null,     -- local currency
+    unrealized_local numeric     not null,
+    mv_local         numeric     not null,     -- market value = position x price
+    fx_rate          numeric     not null,     -- FX rate at snap_time
+    realized_eur     numeric     not null,
+    unrealized_eur   numeric     not null,
+    total_eur        numeric     not null,
+    mv_eur           numeric     not null,
     primary key (snap_time, instrument_id)
 );
 create index if not exists stock_hourly_by_instrument on gold.stock_hourly (instrument_id, snap_time);
 
 create table if not exists gold.portfolio_hourly (
-    snap_time          timestamptz primary key,
-    realized_eur       numeric not null,
-    unrealized_eur     numeric not null,
-    total_eur          numeric not null,
-    realized_eur_cfx   numeric not null,
-    unrealized_eur_cfx numeric not null,
-    total_eur_cfx      numeric not null,
-    long_mv_eur        numeric not null,
-    short_mv_eur       numeric not null,       -- 负数
-    gross_eur          numeric not null,
-    net_eur            numeric not null,
-    peak_total_eur     numeric,                -- 到这个时刻为止的历史最高总盈亏（起点 0）
-    drawdown_eur       numeric                 -- 总盈亏 - 历史最高点，<= 0
+    snap_time      timestamptz primary key,
+    realized_eur   numeric not null,
+    unrealized_eur numeric not null,
+    total_eur      numeric not null
 );
 
+-- One current row per equity, rewritten on every run. The live cards of the dashboard read this.
 create table if not exists gold.live_state (
     instrument_id    uuid primary key,
     position         numeric     not null,
     avg_cost         numeric     not null,
     last_price       numeric     not null,
     price_time       timestamptz not null,
-    price_age_min    numeric     not null,     -- 距上次报价多少分钟（模拟时间）
-    in_session       boolean     not null,
     realized_local   numeric     not null,
     unrealized_local numeric     not null,
     mv_local         numeric     not null,
@@ -85,51 +91,16 @@ create table if not exists gold.live_state (
     unrealized_eur   numeric     not null,
     total_eur        numeric     not null,
     mv_eur           numeric     not null,
-    as_of            timestamptz not null,     -- 这批数字算到哪一条数据（模拟时间）
-    realized_eur_cfx   numeric   not null default 0,   -- 固定汇率口径（Constant FX），和 stock_hourly 的同名列口径一致
-    unrealized_eur_cfx numeric   not null default 0,
-    total_eur_cfx      numeric   not null default 0
+    as_of            timestamptz not null      -- latest event time seen (simulated time)
 );
--- 旧版本建的表没有最后三列：补上（已经有就跳过）。live_state 每次运行都会整体重写，所以不需要迁移数据。
-alter table gold.live_state add column if not exists realized_eur_cfx   numeric not null default 0;
-alter table gold.live_state add column if not exists unrealized_eur_cfx numeric not null default 0;
-alter table gold.live_state add column if not exists total_eur_cfx      numeric not null default 0;
 
-create table if not exists gold.alert_rules (
-    rule_id         text primary key,
-    description     text    not null,
-    threshold       numeric not null,          -- 触发阈值：占总敞口的百分比
-    clear_threshold numeric not null,          -- 解除阈值：回到这里才算解除，避免在阈值附近反复触发
-    severity        text    not null,
-    unit            text                       -- '%gross' = 占总敞口的百分比
-);
--- 阈值按"模拟器默认参数（做市策略）下的正常波动"校准；重跑脚本不会改回你调过的值
-insert into gold.alert_rules (rule_id, description, threshold, clear_threshold, severity, unit) values
-    ('drawdown',   'Total P&L fell from its peak (% of gross exposure)',  0.6,  0.4, 'high',   '%gross'),
-    ('stock_loss', 'One stock total P&L below -x% of gross exposure',     0.3,  0.2, 'medium', '%gross')
-on conflict (rule_id) do nothing;
-
-create table if not exists gold.alerts (
-    alert_id    bigserial primary key,
-    rule_id     text        not null references gold.alert_rules,
-    scope       text        not null,          -- 'portfolio' 或标的代码
-    fired_at    timestamptz not null,          -- 模拟时间
-    cleared_at  timestamptz,                   -- 空 = 仍在触发
-    fired_value numeric     not null,
-    last_value  numeric     not null,
-    threshold   numeric     not null,
-    severity    text        not null
-);
-create index if not exists alerts_open on gold.alerts (rule_id, scope) where cleared_at is null;
-
--- 只保留两条最重要的规则；旧版本留下的其他规则和它们的预警记录一并清掉
-delete from gold.alerts      where rule_id not in ('drawdown', 'stock_loss');
-delete from gold.alert_rules where rule_id not in ('drawdown', 'stock_loss');
-
+-- Progress. watermark = trades with event_time <= watermark are final in gold.position_state.
 create table if not exists gold.process_state (
-    id          int primary key default 1 check (id = 1),
-    last_raw_id bigint      not null default 0,    -- 已处理到 clean 的哪一行（和 clean.process_state 同一个刻度）
-    as_of       timestamptz,
-    updated_at  timestamptz not null default now()
+    id             int primary key default 1 check (id = 1),
+    last_raw_id    bigint      not null default 0,            -- how far into clean we have read (same scale as clean.process_state)
+    watermark      timestamptz not null default '-infinity',  -- event time up to which positions are final
+    too_late_total bigint      not null default 0,            -- trades that arrived behind the watermark and were skipped
+    as_of          timestamptz,
+    updated_at     timestamptz not null default now()
 );
 insert into gold.process_state (id) values (1) on conflict do nothing;

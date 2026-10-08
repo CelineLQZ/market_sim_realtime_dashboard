@@ -1,0 +1,15 @@
+version: 2
+
+# 输入：clean 层（由 sql/clean/ 维护，dbt 只读）
+sources:
+  - name: clean
+    schema: clean
+    tables:
+      - name: trades
+        description: 合格、去重后的成交
+      - name: prices
+        description: 合格、去重后的报价（股票和汇率）
+      - name: instruments
+        description: 标的维度表（type = equity / currency）
+      - name: exchange_sessions
+        description: 各交易所的交易时段（UTC）

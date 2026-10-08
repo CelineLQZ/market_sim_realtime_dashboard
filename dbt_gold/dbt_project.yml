@@ -1,0 +1,13 @@
+# dbt 版 gold 层：读 clean 层，算出和 sql/gold/ 一样的表，写进 gold_dbt schema（不会碰原来的 gold schema）
+name: market_gold
+version: "1.0.0"
+profile: market_sim
+
+models:
+  market_gold:
+    +materialized: table      # 每次运行整表重建：迟到的数据自动落进正确的位置，不需要"重放"逻辑
+
+seeds:
+  market_gold:
+    alert_rules:
+      +column_types: {threshold: numeric, clear_threshold: numeric}

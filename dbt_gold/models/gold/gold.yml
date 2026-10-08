@@ -1,0 +1,74 @@
+version: 2
+
+models:
+  - name: int_positions
+    description: 每笔成交之后的持仓、平均成本、已实现盈亏（本币）。粒度：成交。
+    columns:
+      - name: trade_id
+        data_tests: [unique, not_null]
+
+  - name: fx_rate_hourly
+    description: 1 单位该币种 = 多少欧元。粒度：币种 x 小时。
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [snap_time, ccy]
+    columns:
+      - name: ccy
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [EUR, USD, GBP, JPY]
+      - name: rate_to_eur
+        data_tests: [not_null]
+
+  - name: fx_reference
+    description: 固定参考汇率（第一个有完整汇率的小时）。粒度：币种。
+    columns:
+      - name: ccy
+        data_tests: [unique, not_null]
+
+  - name: stock_hourly
+    description: 核心事实表，每个整点的 as-of 估值。粒度：股票 x 小时。
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [snap_time, instrument_id]
+    columns:
+      - name: instrument_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: source('clean', 'instruments')
+                field: instrument_id
+      - name: total_eur
+        data_tests: [not_null]
+
+  - name: portfolio_hourly
+    description: 全组合的盈亏、敞口、历史最高点和回撤。粒度：小时。
+    columns:
+      - name: snap_time
+        data_tests: [unique, not_null]
+
+  - name: live_state
+    description: 每只股票的当前状态。粒度：股票。
+    columns:
+      - name: instrument_id
+        data_tests: [unique, not_null]
+
+  - name: alert_status
+    description: 预警规则的当前状态（firing / holding / ok）。粒度：规则 x 范围。
+    columns:
+      - name: alert_key
+        data_tests: [unique, not_null]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [firing, holding, ok]
+      - name: rule_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('alert_rules')
+                field: rule_id

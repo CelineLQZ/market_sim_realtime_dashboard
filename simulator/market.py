@@ -68,7 +68,7 @@ class SimConfig:
     start: datetime = datetime(2025, 1, 6, 0, 0, 0, tzinfo=timezone.utc)  # a Monday
     sim_seconds_per_message: float = 30.0   # mean simulated gap between messages
     trade_ratio: float = 0.55               # share of messages that are trades
-    late_prob: float = 0.03                 # chance an event is stamped earlier than "now"
+    late_prob: float = 0.005                # chance an event is stamped earlier than "now"
     late_max_seconds: float = 300.0         # how far back a late event can be stamped
     duplicate_prob: float = 0.0             # chance a message is sent twice (off by default)
     bad_prob: float = 0.01                  # chance a message is corrupted (about 1% of all rows)

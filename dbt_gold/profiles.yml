@@ -1,0 +1,13 @@
+# 本机 PostgreSQL（Homebrew 默认：本机用户、无密码）。dbt 会优先读取当前目录下的 profiles.yml。
+market_sim:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: "{{ env_var('USER') }}"
+      password: "{{ env_var('PGPASSWORD', '') }}"
+      dbname: marketsim
+      schema: gold_dbt
+      threads: 4

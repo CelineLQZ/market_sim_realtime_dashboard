@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sim-seconds-per-message", type=float, default=30.0,
                    help="mean simulated seconds between messages (time speed-up)")
     p.add_argument("--trade-ratio", type=float, default=0.55)
-    p.add_argument("--late-prob", type=float, default=0.03, help="share of out-of-order timestamps")
+    p.add_argument("--late-prob", type=float, default=0.005, help="share of out-of-order timestamps")
     p.add_argument("--late-max-seconds", type=float, default=300.0)
     p.add_argument("--duplicate-prob", type=float, default=0.0, help="share of duplicated messages")
     p.add_argument("--bad-prob", type=float, default=0.01, help="share of corrupted messages (default 1%%)")

@@ -113,8 +113,6 @@ button:focus-visible, select:focus-visible, .hit:focus-visible { outline: 2px so
 .edot { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--surface); }
 .elab { position: absolute; left: 100%; margin-left: 12px; font-size: 12px; color: var(--ink); white-space: nowrap; transform: translateY(-50%); max-width: 136px; overflow: hidden; text-overflow: ellipsis; }
 .elab b { font-weight: 600; }
-.amark { position: absolute; top: 0; bottom: 0; border-left: 2px dashed var(--watch); pointer-events: none; }
-.atag { position: absolute; top: 4px; transform: translateX(-100%); margin-left: -8px; background: var(--watch); color: #fff; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 6px; white-space: nowrap; pointer-events: none; }
 .hit { position: absolute; inset: 0; cursor: crosshair; }
 .cross { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--ink-2); pointer-events: none; display: none; }
 .tip { position: absolute; top: 6px; min-width: 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.14); pointer-events: none; display: none; z-index: 3; }
@@ -153,20 +151,9 @@ th.l, td.l { text-align: left; } td.l { font-family: 'IBM Plex Sans', system-ui,
 tr.sel td { background: var(--select); }
 .thb { font-size: 12px; font-weight: 500; color: var(--ink-2); background: none; border: 0; padding: 5px 0; cursor: pointer; }
 .thb:hover { color: var(--ink); }
-.stale { color: var(--ink); font-weight: 600; }
 
 .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
-.alerts-card { padding: 8px 14px; gap: 6px; flex: 1 1 auto; overflow: auto; }
-.alerts-card.high { border: 2px solid var(--crit); background: var(--crit-bg); padding: 7px 13px; }
-.alerts-card .ah { display: flex; justify-content: space-between; align-items: center; }
-.alerts-card h2 { font-size: 14px; font-weight: 700; }
-.al { font-size: 13px; line-height: 19px; }
-.al .sev { font-weight: 700; margin-right: 4px; }
-.al .sev.high { color: var(--crit); } .al .sev.medium { color: #8a5d00; }
-.al .sev.low { color: var(--ink-3); }
-@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .al .sev.medium { color: var(--warn); } }
-.al small { display: block; font-size: 12px; color: var(--ink-2); }
-.risk { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 0 0 auto; }
+.risk { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 0 0 auto; align-content: start; }
 .risk .card { padding: 6px 12px; gap: 0; }
 .risk .lbl { font-size: 12px; }
 .risk .v { font-size: 18px; line-height: 26px; font-weight: 600; }
@@ -181,7 +168,7 @@ tr.sel td { background: var(--select); }
   <!-- Top bar: title, period slicer, health -->
   <header class="top">
     <div class="brand">
-      <h1>P&amp;L Monitor</h1><span class="chip live" title="The cards, the instrument table, the contribution list and the alerts refresh every 5 s. The curve history refreshes every 30 s.">Live · 5 s</span>
+      <h1>P&amp;L Monitor</h1><span class="chip live" title="The cards, the instrument table, and the contribution list refresh every 5 s. The curve history refreshes every 30 s.">Live · 5 s</span>
       <span class="asof num" id="asof">Waiting for data…</span>
     </div>
     <div class="period">
@@ -199,7 +186,7 @@ tr.sel td { background: var(--select); }
     <div class="kpi hero"><div class="row"><span class="name" id="k1n">Total P&amp;L</span><span class="delta num" id="k1d"></span></div><div class="val num" id="k1v">—</div></div>
     <div class="kpi watched"><div class="row"><span class="name">Unrealized P&amp;L · watched</span><span class="delta num" id="k2d"></span></div><div class="val num" id="k2v">—</div></div>
     <div class="kpi"><div class="row"><span class="name">Realized P&amp;L</span><span class="delta num" id="k3d"></span></div><div class="val num" id="k3v">—</div></div>
-    <div class="kpi"><div class="row"><span class="name">Gross exposure</span><span class="delta num" id="k4d"></span></div><div class="val num" id="k4v">—</div></div>
+    <div class="kpi"><div class="row"><span class="name">Open positions</span><span class="delta num" id="k4d"></span></div><div class="val num" id="k4v">—</div></div>
   </section>
 
   <!-- Main: the P&L line and what drives it -->
@@ -209,7 +196,6 @@ tr.sel td { background: var(--select); }
         <h2 id="chartTitle">P&amp;L (€) over time</h2>
         <div class="ctrls">
           <div class="grp"><span class="lbl">Split by</span><div class="segs" id="dims" role="group" aria-label="Split by"></div></div>
-          <div class="segs" id="fxs" role="group" aria-label="FX basis"></div>
           <div class="segs" id="views" role="group" aria-label="Chart view"></div>
         </div>
       </div>
@@ -227,17 +213,13 @@ tr.sel td { background: var(--select); }
     </div>
   </section>
 
-  <!-- Bottom: explorer + alerts -->
+  <!-- Bottom: explorer + data health -->
   <section class="bottom">
     <div class="card table-card">
       <div class="th2"><h2 id="tblTitle">Instruments</h2><span class="lbl">Click a column to sort · click a row to chart that stock</span></div>
       <div class="tablewrap"><table><thead><tr id="thead"></tr></thead><tbody class="num" id="tbody"></tbody></table></div>
     </div>
     <div class="side">
-      <div class="card alerts-card" id="alertsCard">
-        <div class="ah"><h2>Alerts</h2><span class="chip live">Live</span></div>
-        <div id="alertsBody"></div>
-      </div>
       <div class="risk" id="risk"></div>
     </div>
   </section>
@@ -247,20 +229,20 @@ tr.sel td { background: var(--select); }
 'use strict';
 /* ====================================================================================
    P&L Monitor. Everything comes from the API (/api/...). Two refresh tiers, split by where the data comes from:
-     every 5 s : status, KPIs, instrument table, alerts, contribution ranking   (they read gold.live_state)
+     every 5 s : status, KPIs, instrument table, contribution ranking   (they read gold.live_state)
      every 30 s or when something is clicked : the P&L curve (its history is hourly snapshots;
        its last point is the live value, and is moved every 5 s to match the Total P&L card)
    All text from the API goes into the page with textContent, never innerHTML.
    ==================================================================================== */
 const API = '/api/';
-const TICK_MS = 5000, HOURLY_EVERY = 6, STALE_MIN = 30, REJECT_ALERT = 3;   // REJECT_ALERT: turn the data-quality card red above this % of rejected rows
+const TICK_MS = 5000, HOURLY_EVERY = 6, REJECT_ALERT = 3;   // REJECT_ALERT: turn the data-quality card red above this % of rejected rows
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DASH = ['none', '7 5', 'none', '2 4', 'none', '7 5', 'none', '2 4'];
 const DIMS = [['none','None'], ['country','Country'], ['sector','Sector'], ['exchange','Exchange'], ['currency','Currency']];
 const DIMLBL = { country: 'country', sector: 'sector', exchange: 'exchange', currency: 'currency' };
 
-const S = { fx: 'market', dim: 'none', view: 'total', from: null, to: null, preset: 'All', grp: null, stock: null, sortKey: 'total', sortDir: -1 };
-const D = { meta: null, status: null, kpis: null, stocks: null, alerts: null, curve: null, contrib: null };
+const S = { dim: 'none', view: 'total', from: null, to: null, preset: 'All', grp: null, stock: null, sortKey: 'total', sortDir: -1 };
+const D = { meta: null, status: null, kpis: null, stocks: null, curve: null, contrib: null };
 let days = [], ver = 0, tickN = 0, colorOf = new Map();
 
 /* ---------- small helpers ---------- */
@@ -310,12 +292,12 @@ async function api(path, params) {
   return r.json();
 }
 const lastDay = () => days[days.length - 1];
-// 1D / 5D / All 是"跟随最新"的：新的一天出现后，范围会跟着往后走
+// 1D / 5D / All follow the latest day: when a new day appears the range moves forward with it
 function presetRange(label) {
   const n = days.length, a = label === '1D' ? n - 1 : label === '5D' ? Math.max(0, n - 5) : 0;
   return { preset: label, from: days[a], to: lastDay() };
 }
-// 根据 /api/meta 的快照范围重建日期列表。返回 true 表示列表变了
+// Rebuild the date list from the snapshot range in /api/meta. Returns true if the list changed
 function syncDays(range) {
   if (!range || !range.first_snapshot) return false;
   const a = new Date(range.first_snapshot), b = new Date(range.last_snapshot), next = [];
@@ -341,16 +323,15 @@ async function refreshLive() {
   const v = ++liveVer;
   try {
     const per = periodParams(), scope = scopeParams(), gp = grpParams();
-    const [status, kpis, stocks, alerts, contrib] = await Promise.all([
+    const [status, kpis, stocks, contrib] = await Promise.all([
       api('status'),
-      api('kpis', Object.assign({ fx: S.fx, from: per.from }, scope)),
-      api('stocks', Object.assign({ fx: S.fx, from: per.from }, gp)),
-      api('alerts', { status: 'all', limit: 200 }),
-      isSplit() ? api('contributors', { dim: S.dim, fx: S.fx, from: per.from, to: per.to })
-                : api('contributors', Object.assign({ dim: 'stock', fx: S.fx, from: per.from, to: per.to }, gp)),
+      api('kpis', Object.assign({ from: per.from }, scope)),
+      api('stocks', Object.assign({ from: per.from }, gp)),
+      isSplit() ? api('contributors', { dim: S.dim, from: per.from, to: per.to })
+                : api('contributors', Object.assign({ dim: 'stock', from: per.from, to: per.to }, gp)),
     ]);
     if (v !== liveVer) return;                         // a newer request has started: drop this answer
-    Object.assign(D, { status, kpis, stocks, alerts, contrib });
+    Object.assign(D, { status, kpis, stocks, contrib });
     renderLive(); setOnline(true);
   } catch (e) { console.error(e); if (v === liveVer) setOnline(false); }
 }
@@ -358,7 +339,7 @@ async function refreshHourly() {
   const v = ++hourVer;
   try {
     const per = periodParams(), scope = scopeParams();
-    const curve = await api('pnl-curve', Object.assign({ fx: S.fx, dim: isSplit() ? S.dim : 'none', from: per.from, to: per.to }, scope));
+    const curve = await api('pnl-curve', Object.assign({ dim: isSplit() ? S.dim : 'none', from: per.from, to: per.to }, scope));
     if (v !== hourVer) return;
     D.curve = curve;
     renderHourly();
@@ -375,7 +356,6 @@ function segs(host, items, current, onPick) {
 }
 function renderControls() {
   segs($('dims'), DIMS, S.dim, (k) => setState({ dim: k, grp: null, stock: null }));
-  segs($('fxs'), [['market', 'Market FX'], ['constant', 'Constant FX']], S.fx, (k) => setState({ fx: k }));
   $('views').hidden = isSplit();
   if (!isSplit()) segs($('views'), [['total', 'Total'], ['break', 'Breakdown']], S.view, (k) => { S.view = k; renderControls(); renderHourly(); });
   const n = days.length;
@@ -392,12 +372,10 @@ function renderControls() {
 function renderLive() {
   const st = D.status, k = D.kpis;
   $('asof').textContent = st.as_of ? 'As of ' + fmtTime(new Date(st.as_of)) + ' UTC · simulated · €' : 'Waiting for data…';
-  const staleN = (D.stocks.items || []).filter((r) => r.in_session && r.price_age_min > STALE_MIN).length;
   const mark = { ok: ['●', 'OK'], delayed: ['▲', 'delayed'], stale: ['✕', 'down'], unknown: ['?', 'unknown'] };
   const health = (name, o) => el('span', null, el('span', { class: 'dot ' + o.state, text: mark[o.state][0], 'aria-hidden': 'true' }),
     name + ' ' + mark[o.state][1] + ' · ' + ago(o.seconds_since_last_message ?? o.seconds_since_last_run));
-  $('health').replaceChildren(health('Feed', st.feed), health('Processor', st.processor),
-    el('span', null, el('span', { class: 'dot ' + (staleN ? 'delayed' : 'ok'), text: staleN ? '▲' : '●', 'aria-hidden': 'true' }), staleN + ' stale price' + (staleN === 1 ? '' : 's')));
+  $('health').replaceChildren(health('Feed', st.feed), health('Processor', st.processor));
 
   const scope = S.stock ? ' · ' + S.stock : (S.grp ? ' · ' + S.grp : '');
   $('k1n').textContent = 'Total P&L' + scope;
@@ -407,12 +385,11 @@ function renderLive() {
   $('k2d').textContent = k.unrealized_change_1h == null ? '' : arrow(k.unrealized_change_1h) + money(k.unrealized_change_1h, true) + ' last hour';
   $('k3v').textContent = money(k.realized, true);
   $('k3d').textContent = Math.abs(k.total) > 1 ? Math.round(k.realized / k.total * 100) + '% of total' : '';
-  $('k4v').textContent = money(k.gross);
-  $('k4d').textContent = 'net ' + money(k.net, true);
+  $('k4v').textContent = String(k.open_positions);
+  $('k4d').textContent = 'of ' + (D.stocks.items || []).length + ' stocks';
 
-  renderTable(); renderAlerts(); renderRisk(); renderRank();
+  renderTable(); renderRisk(); renderRank();
   syncLiveEnd();
-  renderMarkers();
 }
 // The curve is fetched every 30 s, the cards every 5 s. Keep the curve's last (live) point equal to the cards.
 function syncLiveEnd() {
@@ -427,53 +404,29 @@ function syncLiveEnd() {
 }
 function renderTable() {
   const items = (D.stocks.items || []).slice();
-  const cols = [['ticker', 'Ticker', 1], ['country', 'Country', 1], ['sector', 'Sector', 1], ['position', 'Position', 0], ['mv_eur', 'Value', 0], ['total', 'Total', 0], ['unrealized', 'Unrealized', 0], ['realized', 'Realized', 0], ['change', 'Period Δ', 0], ['age', 'Price', 1]];
-  const val = (r, k) => (k === 'age' ? (r.in_session ? r.price_age_min : -1) : r[k]);
-  items.sort((a, b) => { const x = val(a, S.sortKey), y = val(b, S.sortKey); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * S.sortDir; });
+  const cols = [['ticker', 'Ticker', 1], ['country', 'Country', 1], ['sector', 'Sector', 1], ['position', 'Position', 0], ['mv_eur', 'Value', 0], ['total', 'Total', 0], ['unrealized', 'Unrealized', 0], ['realized', 'Realized', 0], ['change', 'Period Δ', 0], ['price', 'Price', 0]];
+  items.sort((a, b) => { const x = a[S.sortKey], y = b[S.sortKey]; return (typeof x === 'string' ? x.localeCompare(y) : x - y) * S.sortDir; });
   $('thead').replaceChildren(...cols.map(([k, label, left]) => el('th', { class: left ? 'l' : '' },
     el('button', { class: 'thb', type: 'button', text: label + (S.sortKey === k ? (S.sortDir > 0 ? ' ▲' : ' ▼') : ''),
       onclick: () => { S.sortDir = S.sortKey === k ? -S.sortDir : (left ? 1 : -1); S.sortKey = k; renderTable(); } }))));
   $('tblTitle').textContent = 'Instruments (' + items.length + ')' + (S.grp ? ' · ' + S.grp : '');
   $('tbody').replaceChildren(...items.map((r) => {
-    const stale = r.in_session && r.price_age_min > STALE_MIN;
-    const price = stale ? '▲ Stale · ' + Math.round(r.price_age_min) + ' min' : (r.in_session ? 'OK' : 'Closed');
     return el('tr', { class: S.stock === r.ticker ? 'sel' : '' },
       el('td', { class: 'l' }, el('button', { class: 'pick', type: 'button', text: r.ticker, title: r.name, 'aria-pressed': String(S.stock === r.ticker), onclick: () => toggleStock(r.ticker) })),
       el('td', { class: 'l', text: r.country }), el('td', { class: 'l', text: r.sector, title: r.sector, style: 'max-width:128px;overflow:hidden;text-overflow:ellipsis' }),
       el('td', { text: fmtQty(r.position) }), el('td', { text: r.position === 0 ? '—' : money(r.mv_eur, true) }),
       el('td', { text: money(r.total, true), style: 'font-weight:500' }), el('td', { text: money(r.unrealized, true) }),
       el('td', { text: money(r.realized, true) }), el('td', { text: money(r.change, true) }),
-      el('td', { class: 'l' + (stale ? ' stale' : ''), text: price }));
+      el('td', { text: r.price.toFixed(2) }));
   }));
 }
 function toggleStock(t) { setState({ stock: S.stock === t ? null : t }); }
-const SEV_RANK = { high: 3, medium: 2, low: 1 };
-function renderAlerts() {
-  const all = D.alerts.items || [], open = all.filter((a) => !a.cleared_at).sort((x, y) => SEV_RANK[y.severity] - SEV_RANK[x.severity]);
-  const card = $('alertsCard');
-  card.classList.toggle('high', open.some((a) => a.severity === 'high'));
-  const fmtV = (a, v) => (a.unit === 'min' ? Math.round(v) + ' min' : a.unit === '%gross' ? (v < 0 ? '−' : '') + Math.abs(v).toFixed(2) + '% of gross' : a.unit === '%' ? Number(v).toFixed(2) + '%' : money(v));
-  const body = $('alertsBody');
-  if (!open.length) {
-    body.replaceChildren(el('div', { class: 'al' }, el('span', { class: 'sev', style: 'color:var(--ok)', text: '● ' }), 'No open alerts — all rules within limits.'),
-      el('div', { class: 'num hint', text: all.length ? all.length + ' fired earlier, all cleared' : 'Nothing has fired yet' }));
-    return;
-  }
-  const rows = open.slice(0, 4).map((a) => el('div', { class: 'al' },
-    el('span', { class: 'sev ' + a.severity, text: (a.severity === 'high' ? '▲ High' : a.severity === 'medium' ? '● Medium' : '○ Low') }),
-    a.description + (a.scope !== 'portfolio' ? ' · ' + a.scope : '') + ': ' + fmtV(a, a.last_value) + ' (limit ' + fmtV(a, a.threshold) + ')',
-    el('small', { class: 'num', text: 'Fired ' + fmtTime(new Date(a.fired_at)) + ' UTC' })));
-  if (open.length > 4) rows.push(el('div', { class: 'hint', text: '+' + (open.length - 4) + ' more open' }));
-  body.replaceChildren(...rows);
-}
 function renderRisk() {
-  const k = D.kpis, items = D.stocks.items || [];
-  const q = D.status && D.status.quality, qr = q ? q.reject_rate : null;
-  const staleN = items.filter((r) => r.in_session && r.price_age_min > STALE_MIN).length, sessionN = items.filter((r) => r.in_session).length;
+  const st = D.status, q = st && st.quality, qr = q ? q.reject_rate : null;
   const cards = [
-    ['Drawdown from peak', k.drawdown_eur == null ? '—' : money(k.drawdown_eur), k.peak_eur == null ? '' : 'peak ' + money(k.peak_eur)],
     ['Rejected rows', qr == null ? '—' : qr.toFixed(2) + '%', q ? 'last ' + q.window_rows.toLocaleString('en-US') + ' rows' : '', qr != null && qr >= REJECT_ALERT],
-    ['Stale prices', String(staleN), 'of ' + sessionN + ' in session'],
+    ['Too-late trades', st ? String(st.too_late_total) : '—', 'arrived behind the watermark'],
+    ['Watermark', st && st.watermark ? new Date(st.watermark).toISOString().slice(5, 16).replace('T', ' ') + ' UTC' : '—', 'positions are final up to here'],
   ];
   $('risk').replaceChildren(...cards.map(([l, v, sub, bad]) => el('div', { class: 'card' }, el('span', { class: 'lbl', text: l }), el('div', { class: 'v num', style: bad ? 'color:var(--crit)' : '', text: v }), el('small', { text: sub }))));
 }
@@ -498,7 +451,7 @@ function buildSeries() {
   const c = D.curve, split = isSplit();
   if (!split) {
     const s0 = c.series[0]; if (!s0) return { series: [], many: false };
-    const out = [{ name: S.fx === 'constant' ? 'Total P&L (constant FX)' : 'Total P&L', color: 'var(--total)', w: 3, dash: 'none', vals: s0.total }];
+    const out = [{ name: 'Total P&L', color: 'var(--total)', w: 3, dash: 'none', vals: s0.total }];
     if (S.view === 'break') out.push({ name: 'Realized', color: 'var(--s1)', w: 2, dash: 'none', vals: s0.realized }, { name: 'Unrealized', color: 'var(--s2)', w: 2, dash: '7 5', vals: s0.unrealized });
     return { series: out, many: false };
   }
@@ -510,7 +463,7 @@ function buildSeries() {
 
 function renderHourly() {
   if (!D.curve) return;
-  renderChart(); renderRank(); renderMarkers();
+  renderChart(); renderRank();
   $('chartTitle').textContent = isSplit() ? 'Total P&L (€) by ' + DIMLBL[S.dim] : 'P&L (€) over time';
   const crumbs = [['All stocks', () => setState({ grp: null, stock: null })]];
   if (S.grp) crumbs.push([DIMLBL[S.dim][0].toUpperCase() + DIMLBL[S.dim].slice(1) + ': ' + S.grp, () => setState({ stock: null })]);
@@ -598,22 +551,6 @@ function renderChart() {
   c._times = times; c._x = x;
 }
 
-// dashed vertical line where a portfolio drawdown alert fired (only on the whole-portfolio chart)
-function renderMarkers() {
-  const plot = $('plot'), c = D.curve;
-  plot.querySelectorAll('.amark, .atag').forEach((e) => e.remove());
-  if (!c || !c._times || isSplit() || S.grp || S.stock || !D.alerts) return;
-  const t0 = c._times[0], t1 = c._times[c._times.length - 1], n = c._times.length;
-  const fired = (D.alerts.items || []).filter((a) => a.rule_id === 'drawdown' && a.scope === 'portfolio' && new Date(a.fired_at) >= t0 && new Date(a.fired_at) <= t1);
-  fired.slice(0, 3).forEach((a, k) => {
-    const ft = new Date(a.fired_at); let bi = 0;
-    c._times.forEach((t, i) => { if (Math.abs(t - ft) < Math.abs(c._times[bi] - ft)) bi = i; });
-    const left = c._x(bi).toFixed(2) + '%';
-    plot.insertBefore(el('div', { class: 'amark', style: 'left:' + left }), $('cross'));
-    plot.insertBefore(el('div', { class: 'atag', style: 'left:' + left + ';top:' + (4 + k * 26) + 'px', text: fmtShort(ft) + ' · drawdown alert' }), $('cross'));
-  });
-}
-
 function renderRank() {
   if (!D.contrib) return;
   const items = D.contrib.items || [], host = $('rank'), split = isSplit();
@@ -655,13 +592,13 @@ async function init() {
   setInterval(async () => {
     tickN++;
     const hourly = tickN % HOURLY_EVERY === 0;
-    if (hourly) {                                      // 日期列表随数据增长：每 30 秒更新一次
+    if (hourly) {                                      // the date list grows with the data: refreshed every 30 s
       try { D.meta = await api('meta'); if (syncDays(D.meta.range)) renderControls(); } catch (e) { console.error(e); }
     }
     refresh(hourly);
   }, TICK_MS);
 }
-window.addEventListener('resize', () => { if (D.curve) renderChart(), renderMarkers(); });
+window.addEventListener('resize', () => { if (D.curve) renderChart(); });
 init();
 </script>
 </body>
