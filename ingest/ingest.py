@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 import psycopg
 
 DB = os.environ.get("DATABASE_URL", "dbname=marketsim")   # database connection string
-HOST, PORT = "localhost", 1337                             # simulator address
+HOST = os.environ.get("SIM_HOST", "localhost")           # simulator address (docker compose sets SIM_HOST=simulator)
+PORT = int(os.environ.get("SIM_PORT", "1337"))
 BATCH_ROWS = 100       # write once 100 rows have piled up
 BATCH_SECONDS = 1.0    # or when more than 1 second has passed since the last write (so low traffic never waits long)
 

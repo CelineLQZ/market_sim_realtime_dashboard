@@ -31,18 +31,18 @@ select s.raw_id, s.received_at, s.payload, s.type, s.trade_id, s.instrument_id,
        -- step 3: decide what is wrong. case goes top to bottom and stops at the first match, so a row gets exactly one reason.
        -- a null reason means the row is good.
        case
-           when s.j is null                                   then 'not_json'            -- then 'not_json'            -- format problem
+           when s.j is null                                   then 'not_json'            -- format problem
            when s.type is null or s.type not in ('trade','price') then 'unknown_type'
            when s.instrument_id is null                       then 'bad_instrument_id'
            when s.event_time is null                          then 'bad_date'
-           when s.price is null                               then 'null_price'          -- then 'null_price'          -- value problem
+           when s.price is null                               then 'null_price'          -- value problem
            when s.price <= 0                                  then 'non_positive_price'
            when s.type = 'trade' and s.trade_id is null       then 'bad_trade_id'
            when s.type = 'trade' and (s.volume is null or s.volume <= 0) then 'bad_volume'
            when s.type = 'trade' and s.side is null           then 'bad_side'
            when s.type = 'trade' and s.side not in ('BUY','SELL') then 'bad_side'
-           when i.instrument_id is null                       then 'unknown_instrument'  -- then 'unknown_instrument'  -- lookup problem: not found in the dimension table
-           when s.type = 'trade' and s.currency is distinct from i.currency then 'currency_mismatch'  -- then 'currency_mismatch'  -- currency differs from the instrument's own currency (null counts as different)
+           when i.instrument_id is null                       then 'unknown_instrument'  -- lookup problem: not found in the dimension table
+           when s.type = 'trade' and s.currency is distinct from i.currency then 'currency_mismatch'  -- currency differs from the instrument's own currency (null counts as different)
        end as reason
 from step2 s
 left join clean.instruments i on i.instrument_id = s.instrument_id;

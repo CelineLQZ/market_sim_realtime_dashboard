@@ -1,0 +1,95 @@
+# Whole stack with one command:   docker compose up --build      then open http://localhost:8000
+# Stop:                           docker compose down            (add -v to also delete the database)
+#
+# db ──▶ schema (one-shot: raw tables + clean + gold install) ──▶ ingest, processor, api
+# simulator ──(TCP 1337)──▶ ingest
+#
+# Optional settings (environment variables or a .env file):
+#   SIM_INTERVAL_MIN / SIM_INTERVAL_MAX   real delay between messages in ms (default 100 / 200, about 400 messages a minute)
+#   SIM_LATE_PROB                         share of late messages (default 0.005)
+#   API_PORT                              dashboard port on your machine (default 8000)
+#   DB_PORT                               Postgres port on your machine, for psql / SQL clients (default 5433)
+
+name: market-sim
+
+x-app: &app
+  build: .
+  image: market-sim
+  environment:
+    DATABASE_URL: host=db dbname=marketsim user=marketsim password=marketsim
+    SIM_HOST: simulator
+    PYTHONUNBUFFERED: "1"
+    PGOPTIONS: "-c client_min_messages=warning"   # quiet "does not exist, skipping" notices from the install scripts
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: marketsim
+      POSTGRES_USER: marketsim
+      POSTGRES_PASSWORD: marketsim
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketsim -d marketsim"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot job: create the raw tables, then install the clean and gold layers (safe to repeat).
+  schema:
+    <<: *app
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        python ingest/ingest.py --init
+        && psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f sql/clean/install.sql
+        && psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f sql/gold/install.sql
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  simulator:
+    <<: *app
+    command:
+      - "--interval-min"
+      - "${SIM_INTERVAL_MIN:-100}"
+      - "--interval-max"
+      - "${SIM_INTERVAL_MAX:-200}"
+      - "--late-prob"
+      - "${SIM_LATE_PROB:-0.005}"
+
+  ingest:
+    <<: *app
+    entrypoint: ["python", "ingest/ingest.py"]
+    depends_on:
+      schema:
+        condition: service_completed_successfully
+      simulator:
+        condition: service_started
+    restart: on-failure
+    stop_grace_period: 20s     # lets ingest write the rows it holds before exiting
+
+  processor:
+    <<: *app
+    entrypoint: ["python", "pipeline/processor.py", "--interval", "5"]
+    depends_on:
+      schema:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  api:
+    <<: *app
+    entrypoint: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      schema:
+        condition: service_completed_successfully
+    restart: on-failure
+
+volumes:
+  pgdata:

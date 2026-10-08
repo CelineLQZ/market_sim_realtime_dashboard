@@ -1,6 +1,12 @@
 tests
 samples
+docs
+dbt_gold
+.run
+.git
+.venv
 __pycache__
 *.pyc
 .pytest_cache
 README.md
+*.png

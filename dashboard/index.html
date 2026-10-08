@@ -426,7 +426,7 @@ function renderRisk() {
   const cards = [
     ['Rejected rows', qr == null ? '—' : qr.toFixed(2) + '%', q ? 'last ' + q.window_rows.toLocaleString('en-US') + ' rows' : '', qr != null && qr >= REJECT_ALERT],
     ['Too-late trades', st ? String(st.too_late_total) : '—', 'arrived behind the watermark'],
-    ['Watermark', st && st.watermark ? new Date(st.watermark).toISOString().slice(5, 16).replace('T', ' ') + ' UTC' : '—', 'positions are final up to here'],
+    ['Watermark', st && st.watermark ? new Date(st.watermark).toISOString().slice(5, 16).replace('T', ' ') : '—', 'positions are final up to here'],
   ];
   $('risk').replaceChildren(...cards.map(([l, v, sub, bad]) => el('div', { class: 'card' }, el('span', { class: 'lbl', text: l }), el('div', { class: 'v num', style: bad ? 'color:var(--crit)' : '', text: v }), el('small', { text: sub }))));
 }
