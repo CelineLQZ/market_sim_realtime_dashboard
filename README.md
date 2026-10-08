@@ -126,18 +126,36 @@ make up          # creates the database and tables, starts simulator + ingest + 
 | `make test` | run the test suite |
 | `make up SIM_ARGS="--late-prob 0.02 --interval-min 3 --interval-max 6"` | faster simulator, more late data, handy for demos |
 
-**Or with Docker** (needs Docker with Compose, no local PostgreSQL):
+### Or with Docker
+
+Needs Docker with Compose; no local PostgreSQL or Python. Run these from the project root, the folder that
+contains `docker-compose.yml`.
 
 ```bash
-docker compose up --build       # database, schema, simulator, ingest, processor and API; then open http://localhost:8000
-docker compose down             # stop (add -v to delete the database as well)
+docker compose up --build -d    # build the image and start everything in the background; the terminal is free again
+# open http://localhost:8000    (the page says "Waiting" until the first hourly snapshot exists, about a minute or two)
 ```
 
-Compose starts PostgreSQL, runs a one-shot job that creates the raw tables and installs the clean and gold
-layers, then starts the simulator, ingest, processor and API in dependency order. The data lives in a Docker
-volume, so it survives restarts. Postgres is also published on `localhost:5433` (user, password and database are
-all `marketsim`) if you want to look at the tables with `psql`. The simulator speed, late-data rate and ports can be changed through environment
-variables (see the top of `docker-compose.yml`).
+Without `-d`, `docker compose up` stays in the foreground and prints the logs of all services. `Ctrl-C` then
+stops the whole stack.
+
+| Command | What it does |
+|---|---|
+| `docker compose ps -a` | state of every service. `schema` should show `Exited (0)`: it is a one-shot job that creates the tables and then ends. All the others should be `running` |
+| `docker compose logs -f processor` | follow one service's log (`Ctrl-C` leaves the log, the stack keeps running). Try `ingest`, `api`, `simulator`, or `schema` |
+| `docker compose stop` / `docker compose start` | pause and resume without losing anything |
+| `docker compose down` | remove the containers; the data stays in a Docker volume, so the next `up` continues from it |
+| `docker compose down -v` | also delete the database volume (a clean start) |
+| `docker compose up --build -d` | rebuild after changing code |
+| `docker compose exec db psql -U marketsim -d marketsim` | open `psql` inside the database container |
+
+What `up` does, in order: start PostgreSQL, run the one-shot `schema` job (raw tables, then the clean and gold
+layers), then start the simulator, ingest, processor and API. Postgres is also published on `localhost:5433` (user,
+password and database are all `marketsim`) for SQL clients. In Docker Desktop the project shows a half-filled
+status icon, because `schema` has finished and exited while the other services are running; that is normal.
+
+Settings are environment variables, for example
+`API_PORT=8080 SIM_LATE_PROB=0.02 docker compose up --build -d` (the full list is at the top of `docker-compose.yml`).
 
 ---
 
