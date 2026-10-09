@@ -217,9 +217,9 @@ testable in a throw-away database and easy to read in one place.
 | `raw.events` | Every received line, unchanged | `raw_id` (pk, arrival order), `run_id`, `line_no`, `received_at`, `payload` (text, because garbled lines are not valid JSON) |
 | `raw.ingest_runs` | One row per ingest run, used for **reconciliation**: rows received vs rows stored | `run_id`, `started_at`, `ended_at`, `status` (running / finished / stopped / failed), `rows_received` |
 
-### clean: star schema
+### clean: facts and dimensions
 
-Two fact tables and two dimension tables. `dead_letter` and `process_state` have no join keys and stand alone.
+Two fact tables share one dimension, `instruments`, and `exchange_sessions` hangs off it. This is a typed, validated copy of the stream rather than a strict star schema (there is no time dimension); the analytical shape is built in gold, where `stock_hourly` (stock × hour) is the closest to a star. `dead_letter` and `process_state` have no join keys and stand alone.
 
 ```mermaid
 erDiagram
