@@ -36,11 +36,6 @@ sector, exchange, currency and stock.
 leave a hole in a total. It changes the **average cost**, and every realized and unrealized figure computed
 from that cost afterwards, so one late trade can make the P&L of a whole stock wrong for good.
 
-> Example: buy 100 @ 10 (t1), buy 100 @ 12 (t2), sell 50 @ 13 (t3), but the t2 message arrives after t3.
-> Applied in arrival order, the sale happens at average cost 10: realized **+150**, final average cost **11.33**.
-> Applied in event-time order, the sale happens at average cost 11: realized **+100**, final average cost **11**.
-> The position is 150 shares either way, yet realized P&L and cost are wrong from then on.
-
 The fix is an event-time **watermark** (section 8): a trade is applied only once it is 5 minutes older than the
 latest event time seen, and always in event-time order. The price of correctness is that positions and realized
 P&L trail the market by up to 5 minutes. Prices and FX rates are always the latest.
@@ -66,29 +61,30 @@ then converted to euros and added up.
 ### Definitions
 
 ```
-Realized P&L   = Σ over closing trades of (fill price − average cost) × closed quantity × sign(position before)  − fees
+Realized P&L   = Σ over closing trades of (trade price − average cost) × closed quantity × sign(position before)
 Unrealized P&L = (mark price − average cost) × net position
 Total P&L      = Realized P&L + Unrealized P&L
 ```
 
-- **Average cost** is the quantity-weighted cost of the open position. Adding to a position moves it, reducing
-  a position leaves it unchanged, and a trade that flips the position through zero resets it to the trade price
-  for the part that opens the new position. This is the average-cost method (not FIFO).
+- **Average cost** is the average entry price of the open position, weighted by quantity. For a long position it is
+  the average price of the buys that built it. For a short position it is the average price of the sells that built
+  it. Adding to a position moves it, reducing a position leaves it unchanged, and a trade that flips the position
+  through zero resets it to the trade price for the part that opens the new position. This is the average-cost
+  method (not FIFO).
 - **Net position** is signed: buys are positive, sells negative. A long position gains when the price rises, a
   short position gains when it falls. One formula covers both because the sign sits in the position
   (`sign(position before)` is +1 when a sale closes a long and −1 when a purchase covers a short).
 - **Mark price** is the latest quote for the stock. The feed carries one price per quote, with no bid and ask.
 - **Realized** is locked in by closing trades. **Unrealized** is what closing the whole position at the mark
   price would earn right now. It moves whenever the market moves, with or without a trade.
-- **Fees:** the feed has no fee field, so fees are zero. The term is kept so the definition is complete.
 
 ### One stock, trade by trade
 
 The table follows one stock in its local currency. Trades change the position, the average cost and the
 realized P&L. Quotes change the market price and therefore the unrealized P&L. To keep the example simple,
-each trade is assumed to fill at the prevailing market price.
+each trade is assumed to be made at the prevailing market price.
 
-| # | Event | Fill price | Market price | Position | Avg cost | Realized (this trade) | Realized (cumulative) | Unrealized | Total |
+| # | Event | Trade price | Market price | Position | Avg cost | Realized (this trade) | Realized (cumulative) | Unrealized | Total |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | Buy 100 | 10 | 10 | 100 | 10 | 0 | 0 | 0 | 0 |
 | 2 | Buy 100 | 12 | 12 | 200 | 11 | 0 | 0 | +200 | +200 |
@@ -141,7 +137,7 @@ unrealized € = unrealized_local × fx
 total €      = (realized_local + unrealized_local) × fx
 ```
 
-Why last: the average cost, the fill prices and the market price must be in one currency for the formulas above
+Why last: the average cost, the trade prices and the market price must be in one currency for the formulas above
 to mean anything. If cost were converted at the rate of the day it was incurred and the price at today's rate, the
 result would silently mix price P&L with FX P&L and could not be checked against the local-currency table.
 
