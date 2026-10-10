@@ -15,8 +15,8 @@ trusted, drill-down **profit-and-loss view in euros**, in near real time.
 
 ## 1. The problem
 
-Picture a market-making desk in Europe. It trades 30 stocks on six exchanges (Tokyo, Amsterdam, Frankfurt,
-Paris, London, New York) in four currencies, and it is long some names and short others. The people around
+Picture a market-making desk in Europe. It trades 30 stocks on six exchanges: Amsterdam, Frankfurt and Paris
+(euro), London (pound), New York (dollar) and Tokyo (yen). It is long some names and short others. The people around
 it keep asking the same questions:
 
 - *Traders:* what is the whole book making or losing **right now**, and how much of it is unrealized?
@@ -27,6 +27,23 @@ The input is a continuous TCP stream, and it is not clean. Some lines are garble
 duplicated, some arrive late and out of order, and prices come in several currencies with no direct quote to
 the euro. The job of this project is to turn that stream into numbers people can rely on, and to say clearly
 what was rejected, what arrived too late, and what was assumed.
+
+**What the dashboard is for.** To compute, correctly, the P&L of a portfolio that includes foreign-currency
+stocks, reported in one currency (EUR), and to give a simple attribution of where it comes from: by country,
+sector, exchange, currency and stock.
+
+**A 5-minute delay, by design.** Trades can arrive late and out of order, and a late trade does more than
+leave a hole in a total. It changes the **average cost**, and every realized and unrealized figure computed
+from that cost afterwards, so one late trade can make the P&L of a whole stock wrong for good.
+
+> Example: buy 100 @ 10 (t1), buy 100 @ 12 (t2), sell 50 @ 13 (t3), but the t2 message arrives after t3.
+> Applied in arrival order, the sale happens at average cost 10: realized **+150**, final average cost **11.33**.
+> Applied in event-time order, the sale happens at average cost 11: realized **+100**, final average cost **11**.
+> The position is 150 shares either way, yet realized P&L and cost are wrong from then on.
+
+The fix is an event-time **watermark** (section 8): a trade is applied only once it is 5 minutes older than the
+latest event time seen, and always in event-time order. The price of correctness is that positions and realized
+P&L trail the market by up to 5 minutes. Prices and FX rates are always the latest.
 
 **What makes it a real data-engineering problem**
 
@@ -41,7 +58,137 @@ what was rejected, what arrived too late, and what was assumed.
 
 ---
 
-## 2. The data
+## 2. How the P&L is calculated
+
+This is the heart of the project, so it comes before the plumbing. Each stock gets three numbers, which are
+then converted to euros and added up.
+
+### Definitions
+
+```
+Realized P&L   = Σ over closing trades of (fill price − average cost) × closed quantity × sign(position before)  − fees
+Unrealized P&L = (mark price − average cost) × net position
+Total P&L      = Realized P&L + Unrealized P&L
+```
+
+- **Average cost** is the quantity-weighted cost of the open position. Adding to a position moves it, reducing
+  a position leaves it unchanged, and a trade that flips the position through zero resets it to the trade price
+  for the part that opens the new position. This is the average-cost method (not FIFO).
+- **Net position** is signed: buys are positive, sells negative. A long position gains when the price rises, a
+  short position gains when it falls. One formula covers both because the sign sits in the position
+  (`sign(position before)` is +1 when a sale closes a long and −1 when a purchase covers a short).
+- **Mark price** is the latest quote for the stock. The feed carries one price per quote, with no bid and ask.
+- **Realized** is locked in by closing trades. **Unrealized** is what closing the whole position at the mark
+  price would earn right now. It moves whenever the market moves, with or without a trade.
+- **Fees:** the feed has no fee field, so fees are zero. The term is kept so the definition is complete.
+
+### One stock, trade by trade
+
+The table follows one stock in its local currency. Trades change the position, the average cost and the
+realized P&L. Quotes change the market price and therefore the unrealized P&L. To keep the example simple,
+each trade is assumed to fill at the prevailing market price.
+
+| # | Event | Fill price | Market price | Position | Avg cost | Realized (this trade) | Realized (cumulative) | Unrealized | Total |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Buy 100 | 10 | 10 | 100 | 10 | 0 | 0 | 0 | 0 |
+| 2 | Buy 100 | 12 | 12 | 200 | 11 | 0 | 0 | +200 | +200 |
+| 3 | Quote only | – | 14 | 200 | 11 | 0 | 0 | +600 | +600 |
+| 4 | Sell 50 | 13 | 13 | 150 | 11 | +100 | +100 | +300 | +400 |
+| 5 | Sell 250 | 12 | 12 | −100 | 12 | +150 | +250 | 0 | +250 |
+| 6 | Quote only | – | 11 | −100 | 12 | 0 | +250 | +100 | +350 |
+| 7 | Quote only | – | 13 | −100 | 12 | 0 | +250 | −100 | +150 |
+
+Reading it row by row:
+
+- **Row 2.** Average cost = (100 × 10 + 100 × 12) / 200 = 11. Unrealized = (12 − 11) × 200 = **+200**. Seen
+  another way, the first 100 shares are up 2 each and the second 100 are up 0. Nothing was sold, yet there is
+  already unrealized profit, because the market price is above the cost.
+- **Row 3.** No trade at all, only a new quote (12 → 14). Position and cost are unchanged, and unrealized moves
+  from +200 to (14 − 11) × 200 = **+600**.
+- **Row 4.** Selling does not change the average cost. Realized = (13 − 11) × 50 = **+100**. The 150 shares left
+  are valued at (13 − 11) × 150 = +300.
+- **Row 5.** The trade crosses zero. It closes the 150 long shares for (12 − 11) × 150 = **+150**
+  (cumulative +250), and the other 100 shares open a short at 12, so the average cost resets to 12.
+- **Rows 6 and 7.** The same formula works for the short. The price falls to 11: (11 − 12) × (−100) = **+100**.
+  It rises to 13: (13 − 12) × (−100) = **−100**.
+
+**These are real gains and losses.** For the short: 100 shares were sold at 12 (1,200 received), and buying them
+back at 11 costs 1,100, a profit of 100, which is row 6. For the long in row 3: closing 200 shares at 14 brings
+2,800 against a cost of 2,200, a profit of 600.
+
+There is also a check that needs no cost-basis method at all: **total P&L = cash flow + position × market price**.
+After row 5, cash flow is −1,000 − 1,200 + 650 + 3,000 = 1,450 and the position is worth −100 × 12 = −1,200, so
+the total is 250. After row 7 it is 1,450 − 100 × 13 = 150. `tests/test_pnl.py` asserts this identity.
+
+In the pipeline, trades (after the watermark) move the position and realized P&L, and every new quote moves
+unrealized P&L.
+
+### Converting to euros
+
+**The question.** The book holds euro stocks and also stocks in three other currencies (USD, GBP, JPY), and
+the FX quotes keep changing. At which step should the conversion to euros happen?
+
+**The data.** FX has quotes but **no trades**, so the desk never actually exchanges currency. The assumption is
+that **no currency is exchanged**: foreign stocks are bought and sold in their own currency, and the proceeds stay
+in that foreign currency.
+
+**The rule.** Under that assumption, conversion happens at the very last step, at the moment P&L is
+calculated: first compute realized and unrealized in the local currency, then multiply by the **latest** FX rate.
+
+```
+realized €   = realized_local   × fx
+unrealized € = unrealized_local × fx
+total €      = (realized_local + unrealized_local) × fx
+```
+
+Why last: the average cost, the fill prices and the market price must be in one currency for the formulas above
+to mean anything. If cost were converted at the rate of the day it was incurred and the price at today's rate, the
+result would silently mix price P&L with FX P&L and could not be checked against the local-currency table.
+
+**Direction.** Quotes are `EUR/USD` (USD per EUR), `GBP/USD` (USD per GBP) and `USD/JPY` (JPY per USD):
+
+```
+EUR → 1      USD → 1 / EURUSD      GBP → GBPUSD / EURUSD      JPY → 1 / USDJPY / EURUSD
+```
+
+**What follows.**
+
+- The same local P&L is worth different euros as the rate moves: +250 USD is €227.27 at EURUSD 1.10 and €200.00
+  at 1.25, with no price change at all. FX movements therefore flow into the euro P&L automatically.
+- Realized P&L, once earned, is also re-valued at the current rate. This is the same as assuming the proceeds sit
+  in a foreign-currency account.
+- Each hourly snapshot uses the rate of its own hour, so history is not restated. The live figures use the latest rate.
+- If any of the three FX quotes is still missing, no euro figure is produced (all or nothing), rather than a
+  half-correct one.
+
+**The boundary.** The euro figure is **local-currency P&L translated at spot**. It is not the full return of a
+euro-based investor, because the FX effect on the invested principal is not included. Buy USD 1,000 of stock at EURUSD
+1.10 (€909.09) and let the rate rise to 1.25 with the price unchanged: local P&L is 0, so the dashboard shows €0,
+although the holding is now worth €800.00, which is €109.09 less. Measuring that needs cash accounts and FX
+trades, which the data does not have. Likewise, the period change on the dashboard contains both price effects and
+the FX effect on existing P&L, and does not separate them. Splitting price P&L from FX P&L is listed under future work.
+
+### Aggregation and attribution
+
+- **Portfolio** P&L is the plain sum of the euro P&L of each stock. There is no further adjustment.
+- **Attribution** groups the same stock-level euro figures by the `instruments` dimension: country, sector,
+  exchange, currency, or a single stock. Each group's contribution is its period change, so the groups add up to the
+  portfolio change.
+- **Period change** is the value now minus the value at the start of the period (the last hourly snapshot at or before it).
+
+### Assumptions at a glance
+
+1. No currency exchange happens (FX has quotes only), so euro figures are local P&L at the latest rate.
+2. Average-cost method, shorts allowed.
+3. The mark price is the latest quote, with no bid and ask. A price stays valid until the next one arrives. A stock
+   that has never been quoted is skipped.
+4. No fees, commissions, dividends or financing costs.
+5. Positions and realized P&L include only trades the watermark has passed (up to 5 minutes behind). Prices and FX
+   are always the latest.
+
+---
+
+## 3. The data
 
 ### Inputs
 
@@ -80,13 +227,13 @@ modest on purpose: the point is correctness and design, not throughput.
 ### An important modelling fact: FX has quotes only
 
 FX instruments have **quotes but no trades**. So the desk never converts currency. It simply holds foreign
-stocks, and the foreign currency stays on the books. The consequence, repeated in the metrics section: every
+stocks, and the foreign currency stays on the books. The consequence, worked out in section 2: every
 euro figure is the local-currency P&L translated at the **latest** FX rate, so FX movements flow through the
 euro P&L automatically.
 
 ---
 
-## 3. The output
+## 4. The output
 
 A dashboard at `http://localhost:8000`, backed by a small read-only API.
 
@@ -107,7 +254,7 @@ The API only reads the gold tables. No P&L is calculated in it.
 
 ---
 
-## 4. Run it
+## 5. Run it
 
 Requirements: PostgreSQL running locally (`psql` and `createdb` work) and Python 3.10+.
 
@@ -159,7 +306,7 @@ Settings are environment variables, for example
 
 ---
 
-## 5. Architecture and data flow
+## 6. Architecture and data flow
 
 ```mermaid
 flowchart LR
@@ -189,7 +336,7 @@ Neither layer reprocesses history. Each keeps a progress record and handles only
 - `clean.process_state.last_raw_id`: clean reads `raw_id > last_raw_id`, so a restart resumes where it stopped.
   The progress row is updated in the same transaction as the writes, so "written but not recorded" cannot happen,
   and `for update` stops two overlapping runs from handling the same range.
-- `gold.process_state` holds `last_raw_id` and the **watermark** (section 7).
+- `gold.process_state` holds `last_raw_id` and the **watermark** (section 8).
 
 The logic is plain SQL and PL/pgSQL functions (`clean.run()`, `gold.run()`), which keeps it next to the data,
 testable in a throw-away database and easy to read in one place.
@@ -208,7 +355,7 @@ testable in a throw-away database and easy to read in one place.
 
 ---
 
-## 6. Schemas
+## 7. Schemas
 
 ### raw
 
@@ -288,7 +435,7 @@ erDiagram
 
 ---
 
-## 7. When things go wrong
+## 8. When things go wrong
 
 ### Bad data
 
@@ -335,22 +482,11 @@ easy to reason about.
 
 ---
 
-## 8. How the numbers are calculated
+## 9. Where the calculations live in code
 
-### Assumptions
+The definitions are in section 2. This section shows where each piece is implemented.
 
-1. **No currency conversion happens.** FX has quotes only, so the desk holds foreign stocks in their own
-   currency. All euro figures are **local-currency P&L translated at the latest FX rate**, so the euro P&L moves
-   with FX even when prices do not.
-2. This also means realized P&L, once earned in a foreign currency, keeps being re-valued at the current rate, which
-   is the same as assuming the proceeds stay in foreign cash. The FX gain or loss on the invested principal is not
-   separated out, because there are no cash accounts.
-3. **Average-cost** method (no FIFO), shorts allowed.
-4. No fees, commissions, dividends or financing costs.
-5. FX is all-or-nothing: if any of the three FX quotes is still missing, no € conversion is done yet.
-6. A price is valid until the next one arrives (as-of lookup). Stocks that have never been quoted are skipped.
-
-### Position and realized P&L (per trade, per stock)
+### Position and realized P&L (`gold.apply_new_trades`, per trade, per stock)
 
 Let `q` be the signed quantity (buy +, sell −), `pos` the position before the trade and `avg` its average cost.
 
@@ -360,24 +496,13 @@ Let `q` be the signed quantity (buy +, sell −), `pos` the position before the 
 | Opposite direction (closing) | `pos + q` | unchanged for a partial close; `0` if flat | `closed × (price − avg) × sign(pos)`, where `closed = min(abs(q), abs(pos))` |
 | Crosses zero | `pos + q` | the trade price (the remainder opens fresh) | as above, on the closed part only |
 
-Worked example, the one covered by a test: buy 100 @ 10, buy 100 @ 12 (position 200, avg 11), sell 50 @ 13
-(+100), sell 250 @ 12 (closes 150 for +150, then opens short 100 @ 12; cumulative realized = 250).
+Rows 1, 2, 4 and 5 of the worked example in section 2 are covered by a test.
 
 ### Valuation (`gold.value_position`, shared by the hourly and live paths)
 
-```
-unrealized (local) = position × (price − avg cost)
-market value (local) = position × price
-realized €   = realized_local × fx
-unrealized € = unrealized_local × fx
-total €      = realized € + unrealized €
-```
-
-**FX to EUR.** Quotes are `EUR/USD` (USD per EUR), `GBP/USD` and `USD/JPY`:
-
-```
-EUR → 1        USD → 1 / EURUSD        GBP → GBPUSD / EURUSD        JPY → 1 / USDJPY / EURUSD
-```
+The same function turns a position, average cost, price, realized P&L and FX rate into unrealized P&L, market
+value and all the euro figures. `gold.fx_rates_at()` supplies the rate. Having one function for both paths is what
+keeps the hourly history and the live cards from drifting apart.
 
 ### Snapshots and views
 
@@ -385,13 +510,12 @@ EUR → 1        USD → 1 / EURUSD        GBP → GBPUSD / EURUSD        JPY �
   (as-of join), valued with the FX rate at H. The portfolio total is the sum over stocks. No snapshots are written at weekends.
 - **Live state:** the latest price and the latest *final* position, valued with the latest FX. Positions include only trades
   the watermark has passed, so they lag the newest price by up to 5 minutes.
-- **Period change** = value now − value at the start of the period (the last hourly snapshot at or before it).
 - **Contribution** = each group's period change, sorted largest first. Grouping is by country, sector, exchange,
   currency or stock, and clicking a group drills into its stocks.
 
 ---
 
-## 9. How it is validated
+## 10. How it is validated
 
 ```bash
 make test        # 31 tests, about 30 s; needs local PostgreSQL for the SQL tests
@@ -408,19 +532,19 @@ and the feed / processor freshness are all exposed on `/api/status` and shown on
 
 ---
 
-## 10. Design choices and limits
+## 11. Design choices and limits
 
 - **SQL for the transformations.** The logic is set-based and sits next to the data. It is also readable end to end
   and testable in a disposable database, at the price of PL/pgSQL being less familiar than Python.
 - **Append-only positions with a watermark**, not a replay. Simpler and always correct for data inside the
   window. Anything later is counted and left for a batch correction.
-- **P&L is mark-to-market bookkeeping**, not accounting: no fees, no cash, no FX trades (section 8).
+- **P&L is mark-to-market bookkeeping**, not accounting: no fees, no cash, no FX trades (section 2).
 - **Simulated data and time.** The stream is generated, and its "time" runs faster than the wall clock.
 - **Scale.** It is sized for a single Postgres instance and a few hundred messages per minute, and is not meant as a high-frequency system.
 
 ---
 
-## 11. Future work
+## 12. Future work
 
 - **CI** that runs the tests (and the Compose stack as a smoke test) on every push.
 - **Data-quality assertions** (uniqueness, not-null, accepted values, referential integrity, reconciliation,
@@ -428,7 +552,9 @@ and the feed / processor freshness are all exposed on `/api/status` and shown on
 - **Daily batch pipeline and dashboard:** recompute each trading day from all quotes and trades in event-time
   order, reconcile against the streaming numbers, and fix anything that was too late. This is the Lambda-style
   counterpart of the watermark.
-- **Alerts** (drawdown, single-stock loss), **exposure** (gross / net) and a **constant-FX view** to separate FX effects from price effects.
+- **Alerts** (drawdown, single-stock loss) and **exposure** (gross / net).
+- **Price P&L vs FX P&L:** split the euro P&L into the two effects. This needs cash accounts and FX trades, which the data does not have.
+- **Bid / ask marking** (longs at bid, shorts at ask) if the feed carried both sides.
 - **Stale-price monitoring** using `exchange_sessions`, to tell "market closed" from "feed broken".
 - **Cloud version:** Azure Databricks (Auto Loader → Delta Lake → the same three layers) and an incremental dbt model set.
 
