@@ -1,0 +1,4 @@
+# Everything needed to run the test suite (CI and `make test`): pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8
+numpy>=1.26      # used by one simulator test (realised volatility)

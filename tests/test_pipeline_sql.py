@@ -39,7 +39,9 @@ def conn():
     subprocess.run([sys.executable, "ingest/ingest.py", "--init"], cwd=ROOT, env=env, check=True)
     for f in ("clean", "gold"):
         subprocess.run(["psql", f"dbname={name}", "-v", "ON_ERROR_STOP=1", "-q", "-f", f"sql/{f}/install.sql"], cwd=ROOT, env=env, check=True)
-    c = psycopg.connect(f"dbname={name}", autocommit=True, row_factory=namedtuple_row)
+    # Keep timestamp rendering deterministic on developer machines in any timezone.
+    c = psycopg.connect(f"dbname={name}", autocommit=True, row_factory=namedtuple_row,
+                        options="-c timezone=UTC")
     yield c
     c.close()
     subprocess.run(["dropdb", "--if-exists", name], check=False)

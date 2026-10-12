@@ -1,0 +1,67 @@
+name: CI
+
+# Runs the whole test suite on every push and pull request.
+# The SQL tests need a real PostgreSQL, so the job starts one as a service container.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # The tests call createdb / psql / dropdb and connect with psycopg;
+    # all of them read these standard libpq variables.
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"          # same as the Dockerfile
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install PostgreSQL client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Fail early if the SQL tests could be skipped
+        # test_pipeline_sql.py skips itself when createdb is missing; a skipped suite must not look green.
+        run: |
+          createdb --version
+          pg_isready
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q -rs tests
+
+  compose:
+    # Cheap smoke check: the Compose file stays valid.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q

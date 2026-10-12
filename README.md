@@ -3,6 +3,8 @@
 A streaming data pipeline and dashboard that turn a raw, messy feed of trades and quotes into a
 trusted, drill-down **profit-and-loss view in euros**, in near real time.
 
+[![CI](https://github.com/CelineLQZ/market_sim_realtime_dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/CelineLQZ/market_sim_realtime_dashboard/actions/workflows/ci.yml)
+
 **Stack:** Python · PostgreSQL (PL/pgSQL) · FastAPI · static HTML dashboard · pytest
 **Pattern:** raw → clean → gold (bronze / silver / gold), incremental processing, event-time watermark
 
@@ -517,6 +519,9 @@ keeps the hourly history and the live cards from drifting apart.
 make test        # 31 tests, about 30 s; needs local PostgreSQL for the SQL tests
 ```
 
+The same suite runs on GitHub Actions for every push and pull request (`.github/workflows/ci.yml`), with PostgreSQL started as a service
+container. A separate step fails the job if the PostgreSQL client tools are missing, so the SQL tests can never be skipped silently.
+
 | Suite | Tests | What it proves |
 |---|---|---|
 | `tests/test_pipeline_sql.py` | 6 | Runs the **whole raw → clean → gold chain in a throw-away database**: garbled / bad / duplicate rows and the reconciliation; hourly snapshots only after the watermark; a too-late trade is skipped without rewriting history; out-of-order trades inside the window are sorted; the zero-crossing example above; live state equals the final positions |
@@ -542,7 +547,7 @@ and the feed / processor freshness are all exposed on `/api/status` and shown on
 
 ## 12. Future work
 
-- **CI** that runs the tests (and the Compose stack as a smoke test) on every push.
+- **More CI:** a smoke test that starts the full Compose stack, and `dbt build` once the dbt layer exists. (The test suite already runs on every push.)
 - **Data-quality assertions** (uniqueness, not-null, accepted values, referential integrity, reconciliation,
   incremental-vs-backfill equivalence) as SQL checks runnable against the live database.
 - **Daily batch pipeline and dashboard:** recompute each trading day from all quotes and trades in event-time

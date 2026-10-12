@@ -1,6 +1,7 @@
 # Local run and test commands for market-sim. Run from the project root (the SQL files use relative paths).
 #
-# First time:   make install        install Python dependencies
+# First time:   make install        install runtime dependencies
+# Testing:      make install-dev    install runtime + test dependencies
 #            make up             create database and tables + start all processes (in the background), then open http://localhost:8000
 # Check state:   make status / make logs / make check
 # Stop:     make down
@@ -28,13 +29,16 @@ export PYTHONUNBUFFERED := 1
 export PGOPTIONS := -c client_min_messages=warning
 PSQL = psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -q
 
-.PHONY: help install db schema up down status logs check test backfill reset psql sim ingest processor api
+.PHONY: help install install-dev db schema up down status logs check test backfill reset psql sim ingest processor api
 
 help: ## list all commands
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  make %-10s %s\n", $$1, $$2}'
 
 install: ## install Python dependencies
 	$(PY) -m pip install -r requirements.txt
+
+install-dev: ## install runtime and test dependencies
+	$(PY) -m pip install -r requirements-dev.txt
 
 # ---------------- create database and tables ----------------
 db: ## create the database (skipped if it exists)
